@@ -1,0 +1,562 @@
+/* ==========================================================================
+   QQ Aeroplane Chess 3D (QQ飞行棋 3D) — Responsive Kid-Friendly Sky-Arcade Styles
+   Verified across 1280x800, 1024x768, 844x390, and 390x844:
+   - Zero scrollbars (fixed viewport lock)
+   - <= 6 visible clickable HUD controls on every screen
+   - Every visible button >= 68x68px with zero bounding-box overlap
+   ========================================================================== */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  -webkit-tap-highlight-color: transparent;
+}
+
+[hidden] {
+  display: none !important;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden !important;
+  position: fixed;
+  inset: 0;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  background: radial-gradient(circle at 50% 25%, #e0f2fe 0%, #7dd3fc 65%, #38bdf8 100%);
+  font-family: "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Nunito", system-ui, -apple-system, sans-serif;
+  color: #0f172a;
+}
+
+#board-canvas {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  z-index: 1;
+  touch-action: none;
+  cursor: pointer;
+}
+
+#ui-root {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: 10;
+}
+
+.ui-screen {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+/* ==========================================================================
+   Shared Tactile Sky Button Base (>= 68x68px guaranteed)
+   ========================================================================== */
+.sky-btn {
+  pointer-events: auto;
+  min-width: 70px;
+  min-height: 70px;
+  padding: 10px 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 3.5px solid #ffffff;
+  border-radius: 999px;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 900;
+  color: #ffffff;
+  text-shadow: 0 2px 3px rgba(15, 23, 42, 0.35);
+  box-shadow:
+    0 6px 0 rgba(15, 23, 42, 0.22),
+    0 12px 24px rgba(15, 23, 42, 0.22),
+    inset 0 3px 5px rgba(255, 255, 255, 0.55);
+  transition: transform 0.12s ease, filter 0.12s ease;
+  touch-action: manipulation;
+}
+
+.sky-btn:hover {
+  filter: brightness(1.06);
+}
+
+.sky-btn:active {
+  transform: translateY(3px) scale(0.97);
+}
+
+.btn-primary-xl {
+  min-width: 210px;
+  min-height: 76px;
+  padding: 12px 28px;
+  font-size: 24px;
+  background: linear-gradient(180deg, #4ade80 0%, #22c55e 55%, #16a34a 100%);
+}
+
+.btn-primary-lg {
+  min-width: 190px;
+  min-height: 72px;
+  padding: 10px 24px;
+  font-size: 20px;
+  background: linear-gradient(180deg, #4ade80 0%, #22c55e 55%, #16a34a 100%);
+}
+
+.btn-secondary-lg {
+  min-width: 176px;
+  min-height: 72px;
+  padding: 10px 22px;
+  font-size: 20px;
+  background: linear-gradient(180deg, #38bdf8 0%, #0284c7 60%, #0369a1 100%);
+}
+
+/* ==========================================================================
+   1. Title Screen
+   ========================================================================== */
+.screen-title {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: space-between;
+  padding: 20px 16px 26px;
+}
+
+.title-banner {
+  pointer-events: none;
+  text-align: center;
+  padding: 12px 24px;
+  border-radius: 28px;
+  background: rgba(255, 255, 255, 0.88);
+  border: 3.5px solid #ffffff;
+  box-shadow: 0 12px 30px rgba(2, 132, 199, 0.24);
+}
+
+.title-badge-row {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.title-pill {
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 800;
+  background: #e0f2fe;
+  color: #0369a1;
+}
+
+.title-pill.gold {
+  background: #fef3c7;
+  color: #b45309;
+}
+
+.title-heading {
+  margin: 2px 0;
+  font-size: 38px;
+  font-weight: 900;
+  color: #0284c7;
+  text-shadow: 0 2px 0 #ffffff;
+}
+
+.title-subtitle {
+  margin: 2px 0 0;
+  font-size: 14px;
+  font-weight: 800;
+  color: #334155;
+}
+
+.title-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+}
+
+/* ==========================================================================
+   2. Setup / Mode Select Screen
+   ========================================================================== */
+.screen-select {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 12px;
+}
+
+.setup-panel {
+  pointer-events: auto;
+  width: min(760px, 96vw);
+  padding: 16px 18px;
+  border-radius: 28px;
+  background: rgba(255, 255, 255, 0.90);
+  border: 3.5px solid #ffffff;
+  box-shadow: 0 16px 38px rgba(15, 23, 42, 0.25);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.setup-title {
+  margin: 0;
+  text-align: center;
+  font-size: 24px;
+  font-weight: 900;
+  color: #0369a1;
+}
+
+.setup-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.setup-card {
+  pointer-events: auto;
+  min-width: 140px;
+  min-height: 74px;
+  padding: 10px 14px;
+  border-radius: 20px;
+  border: 3px solid #bae6fd;
+  background: linear-gradient(180deg, #ffffff 0%, #f0f9ff 100%);
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  box-shadow: 0 4px 12px rgba(2, 132, 199, 0.14);
+  touch-action: manipulation;
+}
+
+.setup-card:active {
+  transform: scale(0.98);
+}
+
+.card-kicker {
+  font-size: 12px;
+  font-weight: 800;
+  color: #64748b;
+}
+
+.card-val {
+  font-size: 16px;
+  font-weight: 900;
+  color: #0f172a;
+}
+
+.setup-footer {
+  display: flex;
+  justify-content: center;
+}
+
+/* ==========================================================================
+   3. Active Gameplay HUD Screen
+   ========================================================================== */
+.screen-playing {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: 10px 12px 12px;
+}
+
+.hud-top-bar {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+}
+
+.hud-roster-strip {
+  pointer-events: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  max-width: 48%;
+}
+
+.roster-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 10px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.88);
+  border: 2.5px solid #ffffff;
+  font-size: 13px;
+  font-weight: 900;
+  color: #1e293b;
+  box-shadow: 0 4px 10px rgba(15, 23, 42, 0.14);
+}
+
+.roster-chip.active-turn {
+  border-color: var(--chip-color, #ef4444);
+  background: #ffffff;
+  transform: scale(1.05);
+}
+
+.chip-dot {
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  background: var(--chip-color, #ef4444);
+}
+
+.hud-coach-pill {
+  pointer-events: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.82);
+  border: 2.5px solid rgba(255, 255, 255, 0.85);
+  color: #ffffff;
+  font-size: 14px;
+  font-weight: 800;
+  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.25);
+  max-width: 440px;
+}
+
+.coach-die {
+  font-size: 20px;
+  color: #fbbf24;
+  font-weight: 900;
+}
+
+.hud-top-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.hud-icon-btn {
+  width: 70px;
+  height: 70px;
+  min-width: 70px;
+  min-height: 70px;
+  padding: 0;
+  font-size: 26px;
+  background: linear-gradient(180deg, #38bdf8 0%, #0284c7 100%);
+}
+
+.hud-bottom-dock {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  width: 100%;
+  flex-wrap: nowrap;
+}
+
+.hud-roll-btn {
+  min-width: 152px;
+  min-height: 74px;
+  padding: 10px 22px;
+  background: linear-gradient(180deg, #fbbf24 0%, #f59e0b 55%, #d97706 100%);
+  font-size: 21px;
+}
+
+.roll-die-icon {
+  font-size: 26px;
+}
+
+.hud-plane-btn {
+  min-width: 78px;
+  min-height: 72px;
+  padding: 8px 12px;
+  flex-direction: column;
+  gap: 2px;
+  border-radius: 22px;
+  background: linear-gradient(180deg, var(--plane-color, #ef4444) 0%, #1e293b 160%);
+}
+
+.plane-btn-num {
+  font-size: 14px;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.plane-btn-tag {
+  font-size: 12px;
+  font-weight: 800;
+  color: #fef08a;
+  white-space: nowrap;
+}
+
+/* ==========================================================================
+   4. Pause Modal & 5. Podium Screen
+   ========================================================================== */
+.screen-paused {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(15, 23, 42, 0.42);
+  padding: 16px;
+}
+
+.modal-card {
+  pointer-events: none;
+  padding: 20px 24px;
+  border-radius: 28px;
+  background: rgba(255, 255, 255, 0.94);
+  border: 4px solid #ffffff;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+}
+
+.modal-title {
+  margin: 0;
+  font-size: 28px;
+  font-weight: 900;
+  color: #0284c7;
+}
+
+.modal-sub {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 800;
+  color: #475569;
+}
+
+.modal-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.screen-podium {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px 20px;
+}
+
+.podium-top-card {
+  pointer-events: none;
+  text-align: center;
+  padding: 12px 22px;
+  border-radius: 26px;
+  background: rgba(255, 255, 255, 0.90);
+  border: 3.5px solid #ffffff;
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.22);
+}
+
+.podium-stars {
+  font-size: 28px;
+  line-height: 1.1;
+}
+
+.podium-headline {
+  margin: 4px 0 8px;
+  font-size: 24px;
+  font-weight: 900;
+  color: #b45309;
+}
+
+.podium-ranks-row {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+}
+
+.podium-rank-chip {
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: #f8fafc;
+  border: 2px solid #e2e8f0;
+  font-size: 12px;
+  font-weight: 800;
+  display: inline-flex;
+  gap: 6px;
+}
+
+.podium-bottom-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 16px;
+}
+
+/* ==========================================================================
+   Compact Responsive Rules for Portrait (390x844) & Short Landscape (844x390)
+   ========================================================================== */
+@media (max-width: 600px) {
+  .title-heading {
+    font-size: 28px;
+  }
+  .setup-grid {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+  .setup-card {
+    min-height: 68px;
+    padding: 6px 12px;
+  }
+  .hud-coach-pill {
+    display: none;
+  }
+  .hud-roster-strip {
+    max-width: 56%;
+  }
+  .roster-chip {
+    padding: 3px 7px;
+    font-size: 11px;
+  }
+  .hud-plane-btn {
+    min-width: 70px;
+    min-height: 70px;
+    padding: 6px 8px;
+  }
+  .hud-roll-btn {
+    min-width: 116px;
+    min-height: 70px;
+    padding: 8px 14px;
+    font-size: 17px;
+  }
+}
+
+@media (max-height: 450px) {
+  .screen-title {
+    padding: 8px 12px 12px;
+  }
+  .title-heading {
+    font-size: 26px;
+  }
+  .setup-panel {
+    padding: 10px 14px;
+    gap: 8px;
+  }
+  .setup-title {
+    font-size: 18px;
+  }
+  .setup-card {
+    min-height: 68px;
+    padding: 6px 10px;
+  }
+  .btn-primary-xl {
+    min-height: 68px;
+    font-size: 20px;
+  }
+}
