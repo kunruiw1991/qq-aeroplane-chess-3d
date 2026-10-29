@@ -353,19 +353,20 @@ export function buildBoardSceneGroup() {
   starBase.position.y = 0.08;
   centerGroup.add(starBase);
 
-  // 3D Tumbling Die inside Center Crystal Dome
+  // 3D Tumbling Die inside Center Crystal Dome (1.6x result face scale)
   const dieGroup = build3DDieMesh();
-  dieGroup.position.set(0, 0.56, 0);
+  dieGroup.position.set(0, 0.72, 0);
+  dieGroup.scale.setScalar(1.6);
   centerGroup.add(dieGroup);
 
   const crystalDome = new THREE.Mesh(
-    new THREE.SphereGeometry(0.78, 24, 16, 0, Math.PI * 2, 0, Math.PI * 0.55),
+    new THREE.SphereGeometry(1.06, 24, 16, 0, Math.PI * 2, 0, Math.PI * 0.56),
     new THREE.MeshStandardMaterial({
       color: 0xe0f2fe,
       roughness: 0.12,
       metalness: 0.08,
       transparent: true,
-      opacity: 0.32,
+      opacity: 0.28,
     })
   );
   crystalDome.position.y = 0.14;
@@ -399,7 +400,8 @@ export function buildBoardSceneGroup() {
 
   let currentDieTarget = { rx: 0, rz: 0 };
   let tumbleSpinTimer = 0;
-  let lastSeenRoll = null;
+  let stampPopTimer = 0;
+  let lastSeenRollKey = '';
 
   function updateBoardAnimations(simSnap, timeSec, dtSec) {
     for (const r of radarDishes) {
@@ -415,22 +417,32 @@ export function buildBoardSceneGroup() {
     }
 
     const rollVal = simSnap?.diceValue || simSnap?.lastDiceRoll || 6;
-    if (rollVal !== lastSeenRoll && DIE_FACE_UP_ROTATIONS[rollVal]) {
-      lastSeenRoll = rollVal;
+    const rollKey = `${simSnap?.turnNumber || 0}:${simSnap?.consecutiveSixes || 0}:${rollVal}`;
+    if (rollKey !== lastSeenRollKey && DIE_FACE_UP_ROTATIONS[rollVal]) {
+      lastSeenRollKey = rollKey;
       currentDieTarget = DIE_FACE_UP_ROTATIONS[rollVal];
-      tumbleSpinTimer = 0.80;
+      tumbleSpinTimer = 0.50; // 30 frames @ 60fps
+      stampPopTimer = 0.28;
     }
 
     if (tumbleSpinTimer > 0) {
       tumbleSpinTimer = Math.max(0, tumbleSpinTimer - dtSec);
-      dieGroup.rotation.x += dtSec * 18;
-      dieGroup.rotation.y += dtSec * 14;
-      dieGroup.rotation.z += dtSec * 16;
-      dieGroup.position.y = 0.56 + Math.sin((tumbleSpinTimer / 0.80) * Math.PI) * 0.52;
+      dieGroup.rotation.x += dtSec * 22;
+      dieGroup.rotation.y += dtSec * 17;
+      dieGroup.rotation.z += dtSec * 19;
+      dieGroup.position.y = 0.72 + Math.sin((tumbleSpinTimer / 0.50) * Math.PI) * 0.62;
+      dieGroup.scale.setScalar(1.6 + Math.sin((1 - tumbleSpinTimer / 0.50) * Math.PI) * 0.32);
     } else {
-      dieGroup.position.y = 0.54 + Math.sin(timeSec * 3.0) * 0.04;
-      dieGroup.rotation.x += (currentDieTarget.rx - dieGroup.rotation.x) * Math.min(1, dtSec * 14);
-      dieGroup.rotation.z += (currentDieTarget.rz - dieGroup.rotation.z) * Math.min(1, dtSec * 14);
+      if (stampPopTimer > 0) {
+        stampPopTimer = Math.max(0, stampPopTimer - dtSec);
+        const popBump = Math.sin((stampPopTimer / 0.28) * Math.PI) * 0.38;
+        dieGroup.scale.setScalar(1.6 + popBump);
+      } else {
+        dieGroup.scale.setScalar(1.6);
+      }
+      dieGroup.position.y = 0.70 + Math.sin(timeSec * 3.0) * 0.04;
+      dieGroup.rotation.x += (currentDieTarget.rx - dieGroup.rotation.x) * Math.min(1, dtSec * 16);
+      dieGroup.rotation.z += (currentDieTarget.rz - dieGroup.rotation.z) * Math.min(1, dtSec * 16);
       dieGroup.rotation.y = Math.sin(timeSec * 0.8) * 0.15;
     }
   }
@@ -439,6 +451,7 @@ export function buildBoardSceneGroup() {
     root,
     dieGroup,
     updateBoardAnimations,
+    getDieScale: () => Number(dieGroup.scale.x.toFixed(2)),
   };
 }
 

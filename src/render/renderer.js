@@ -160,6 +160,18 @@ export class Renderer3D {
       120
     );
     this.cameraDistance = 20.5;
+    this.baseCameraDistance = 19.6;
+    this.cameraZoomRatio = 1.0;
+    this.cameraPunchState = {
+      active: false,
+      remainingSec: 0,
+      maxSec: 0.65,
+      targetX: 0,
+      targetZ: 0,
+    };
+    this.cameraFollowActive = false;
+    this.floatingTexts = [];
+    this._fxIdSeq = 0;
 
     // Warm cheerful sky lighting
     const hemiLight = new THREE.HemisphereLight(0xffffff, 0xbae6fd, 1.25);
@@ -220,7 +232,8 @@ export class Renderer3D {
       baseDist = 18.4;
     }
 
-    this.cameraDistance = baseDist;
+    this.baseCameraDistance = baseDist;
+    this.cameraDistance = baseDist * (this.cameraZoomRatio || 1.0);
     this.camera.position.set(0, baseDist * 0.80, baseDist * 0.58);
     this.camera.lookAt(0, -0.25, 0.35);
   }
@@ -228,11 +241,34 @@ export class Renderer3D {
   setScreenMode(mode) {
     this.screenMode = mode;
     this.podiumBundle.group.visible = mode === SCREEN_IDS.PODIUM;
+    this.cameraZoomRatio = 1.0;
+    this.cameraPunchState.active = false;
+    this.cameraPunchState.remainingSec = 0;
+    this.cameraFollowActive = false;
+    this.floatingTexts.length = 0;
     this._updateCameraForViewport();
   }
 
+  projectWorldToScreen(x, y, z) {
+    this.scene.updateMatrixWorld(true);
+    this.camera.updateMatrixWorld(true);
+    const worldPos = new THREE.Vector3(x, y, z);
+    worldPos.project(this.camera);
+
+    const rect = this.canvas.getBoundingClientRect();
+    const w = rect.width || this.viewportWidth;
+    const h = rect.height || this.viewportHeight;
+    const clientX = (rect.left || 0) + (worldPos.x * 0.5 + 0.5) * w;
+    const clientY = (rect.top || 0) + (-worldPos.y * 0.5 + 0.5) * h;
+
+    return {
+      clientX: Number(clientX.toFixed(1)),
+      clientY: Number(clientY.toFixed(1)),
+    };
+  }
+
   /**
-   * Raycasts against the 16 3D planes from client (x, y) coordinates.
+   * Raycasts against the 16 3D planes (and destination ghost previews) from client (x, y) coordinates.
    * Prioritizes legal movable planes of the current player when in `await_move`.
    */
   raycastPlaneAtClientXY(clientX, clientY, simSnap = null) {
@@ -251,7 +287,7 @@ export class Renderer3D {
     const legalSet = new Set(simSnap?.legalPlaneIndices || []);
     const activeColor = simSnap?.currentPlayer ?? -1;
 
-    // First look for a hit on a legal movable plane of the current player
+    // First look for a hit on a legal movable plane (or its destination ghost) of the current player
     for (const hit of hits) {
       const ud = hit.object?.userData;
       if (
@@ -261,10 +297,11 @@ export class Renderer3D {
       ) {
         return {
           colorIndex: ud.colorIndex,
-          colorId: ud.colorId,
+          colorId: ud.colorId || COLOR_IDS[ud.colorIndex],
           planeIndex: ud.planeIndex,
           globalPlaneIndex: ud.globalPlaneIndex,
           isLegal: true,
+          isGhostDestination: Boolean(ud.isGhostDestination),
         };
       }
     }
@@ -272,13 +309,14 @@ export class Renderer3D {
     // Otherwise return the closest plane hit
     for (const hit of hits) {
       const ud = hit.object?.userData;
-      if (ud && ud.planeIndex !== undefined) {
+      if (ud && ud.planeIndex !== undefined && !ud.isGhostDestination) {
         return {
           colorIndex: ud.colorIndex,
-          colorId: ud.colorId,
+          colorId: ud.colorId || COLOR_IDS[ud.colorIndex],
           planeIndex: ud.planeIndex,
           globalPlaneIndex: ud.globalPlaneIndex,
           isLegal: ud.colorIndex === activeColor && legalSet.has(ud.planeIndex),
+          isGhostDestination: false,
         };
       }
     }
@@ -313,15 +351,63 @@ export class Renderer3D {
       clientX: Number(clientX.toFixed(1)),
       clientY: Number(clientY.toFixed(1)),
       highlighted: Boolean(entry.legalHighlightGroup.visible),
+      isBestHint: Boolean(entry.isBestHint),
     };
   }
 
+  _spawnFloatingText(kind, text, fullText, x, y, z, durationSec = 1.05) {
+    this._fxIdSeq += 1;
+    this.floatingTexts.push({
+      id: this._fxIdSeq,
+      kind,
+      text,
+      fullText,
+      x: Number(x) || 0,
+      y: Number(y) || 1.15,
+      z: Number(z) || 0,
+      remainingSec: durationSec,
+      maxSec: durationSec,
+    });
+    if (this.floatingTexts.length > 8) {
+      this.floatingTexts.splice(0, this.floatingTexts.length - 8);
+    }
+  }
+
   render(simSnap, dtSec = 1 / 60, uiState = {}) {
-    this.elapsedSec += Math.max(0, dtSec);
+    const rawDt = Math.max(0, dtSec);
+    this.elapsedSec += rawDt;
     const pendingEvents = uiState.pendingEvents || [];
 
-    this.boardBundle.updateBoardAnimations(simSnap, this.elapsedSec, dtSec);
-    this.planesBundle.updatePlanesAndEffects(simSnap, this.elapsedSec, dtSec, pendingEvents);
+    // Trigger camera punch-in & floating spectacle texts from match events
+    for (const ev of pendingEvents) {
+      if (ev.type === 'plane_capture' || ev.type === 'runway_capture') {
+        const cx = ev.x ?? 0;
+        const cz = ev.z ?? 0;
+        this.cameraPunchState.active = true;
+        this.cameraPunchState.remainingSec = 0.65;
+        this.cameraPunchState.maxSec = 0.65;
+        this.cameraPunchState.targetX = cx;
+        this.cameraPunchState.targetZ = cz;
+        this._spawnFloatingText('capture', '击落!', '💥 击落!', cx, 1.18, cz, 1.05);
+      } else if (ev.type === 'plane_goal') {
+        this._spawnFloatingText('goal', '到家!', '👑 到家!', 0, 1.38, 0, 1.25);
+      } else if (ev.type === 'plane_fly') {
+        this._spawnFloatingText('fly', '超级飞棋!', '✈️ 超级飞棋!', 0, 1.25, 0, 0.95);
+      }
+    }
+
+    // Update floating text timers
+    for (let i = this.floatingTexts.length - 1; i >= 0; i -= 1) {
+      const ft = this.floatingTexts[i];
+      ft.remainingSec -= rawDt;
+      ft.y += rawDt * 0.65;
+      if (ft.remainingSec <= 0) {
+        this.floatingTexts.splice(i, 1);
+      }
+    }
+
+    this.boardBundle.updateBoardAnimations(simSnap, this.elapsedSec, rawDt);
+    this.planesBundle.updatePlanesAndEffects(simSnap, this.elapsedSec, rawDt, pendingEvents);
 
     if (this.screenMode === SCREEN_IDS.PODIUM) {
       this.podiumBundle.group.visible = true;
@@ -330,16 +416,96 @@ export class Renderer3D {
       this.podiumBundle.group.visible = false;
     }
 
+    const fxDiag = this.planesBundle.getEffectDiagnostics();
+    const baseDist = this.baseCameraDistance || 19.6;
+
     if (this.screenMode === SCREEN_IDS.TITLE || this.screenMode === SCREEN_IDS.SELECT) {
-      // Gentle showcase orbit on Title/Select screens
+      this.cameraZoomRatio = 1.0;
+      this.cameraPunchState.active = false;
+      this.cameraFollowActive = false;
       const angle = Math.sin(this.elapsedSec * 0.35) * 0.22;
-      const dist = this.cameraDistance;
+      const dist = baseDist;
+      this.cameraDistance = dist;
       this.camera.position.set(
         Math.sin(angle) * dist * 0.55,
         dist * 0.78,
         Math.cos(angle) * dist * 0.58
       );
       this.camera.lookAt(0, -0.2, 0.2);
+    } else if (this.screenMode === SCREEN_IDS.PLAYING) {
+      const anim = simSnap?.activeAnimation || null;
+      const animProgress = anim
+        ? Math.min(1, Math.max(0, (anim.elapsedFrames || 0) / Math.max(1, anim.totalFrames || 1)))
+        : 1;
+
+      if (!anim) {
+        // Move animation has finished -> guarantee camera is 100% eased back to full-board framing
+        // before the next human AWAIT_ROLL!
+        this.cameraPunchState.active = false;
+        this.cameraPunchState.remainingSec = 0;
+        this.cameraFollowActive = false;
+        this.cameraZoomRatio = 1.0;
+        this.cameraDistance = baseDist;
+        this.camera.position.set(0, baseDist * 0.80, baseDist * 0.58);
+        this.camera.lookAt(0, -0.25, 0.35);
+      } else if (this.cameraPunchState.active || (anim.capturedPlanes && anim.capturedPlanes.length > 0)) {
+        // 15% camera punch-in toward impact for first 55% of capture animation,
+        // then smoothly ease back to 1.0 full-board framing within <= 0.9s!
+        this.cameraPunchState.active = true;
+        this.cameraFollowActive = false;
+        if (!this.cameraPunchState.targetX && !this.cameraPunchState.targetZ && fxDiag.lastCaptureImpact) {
+          this.cameraPunchState.targetX = fxDiag.lastCaptureImpact.x;
+          this.cameraPunchState.targetZ = fxDiag.lastCaptureImpact.z;
+        }
+        let punchWeight = 1.0;
+        if (animProgress > 0.55) {
+          const t = Math.min(1, Math.max(0, (animProgress - 0.55) / 0.45));
+          punchWeight = 1.0 - t * t * (3 - 2 * t);
+        }
+        this.cameraZoomRatio = 1.0 - 0.15 * punchWeight;
+        const dist = baseDist * this.cameraZoomRatio;
+        this.cameraDistance = dist;
+        const tx = this.cameraPunchState.targetX * punchWeight;
+        const tz = this.cameraPunchState.targetZ * punchWeight;
+        this.camera.position.set(
+          tx * 0.25,
+          dist * 0.80,
+          dist * 0.58 + tz * 0.20
+        );
+        this.camera.lookAt(
+          tx * 0.45,
+          -0.25 + 0.30 * punchWeight,
+          0.35 + (this.cameraPunchState.targetZ - 0.35) * 0.45 * punchWeight
+        );
+      } else if (fxDiag.activeFlyingPlaneWorldPos) {
+        // Camera follows the plane during 18->30 super-fly bridge and eases back at the end!
+        this.cameraFollowActive = true;
+        let followWeight = 1.0;
+        if (animProgress > 0.65) {
+          const t = Math.min(1, Math.max(0, (animProgress - 0.65) / 0.35));
+          followWeight = 1.0 - t * t * (3 - 2 * t);
+        }
+        this.cameraZoomRatio = 1.0 - 0.10 * followWeight;
+        const dist = baseDist * this.cameraZoomRatio;
+        this.cameraDistance = dist;
+        const fp = fxDiag.activeFlyingPlaneWorldPos;
+        this.camera.position.set(
+          fp.x * 0.30 * followWeight,
+          dist * (0.80 - 0.04 * followWeight),
+          dist * (0.58 - 0.03 * followWeight) + fp.z * 0.24 * followWeight
+        );
+        this.camera.lookAt(
+          fp.x * 0.55 * followWeight,
+          -0.25 + 0.45 * followWeight,
+          0.35 + (fp.z * 0.55 - 0.35) * followWeight
+        );
+      } else {
+        this.cameraFollowActive = false;
+        this.cameraZoomRatio = 1.0;
+        this.cameraDistance = baseDist;
+        this.camera.position.set(0, baseDist * 0.80, baseDist * 0.58);
+        this.camera.lookAt(0, -0.25, 0.35);
+      }
     }
 
     this.webgl.render(this.scene, this.camera);
@@ -356,16 +522,51 @@ export class Renderer3D {
       }
     }
 
+    const fxDiag = this.planesBundle.getEffectDiagnostics();
+    const ghostPreviews = (fxDiag.activeGhosts || []).map((g) => {
+      const sc = this.projectWorldToScreen(g.destX, 0.52, g.destZ);
+      return {
+        ...g,
+        clientX: sc.clientX,
+        clientY: sc.clientY,
+      };
+    });
+
+    const activeFloatingTexts = this.floatingTexts.map((ft) => {
+      const sc = this.projectWorldToScreen(ft.x, ft.y, ft.z);
+      return {
+        id: ft.id,
+        kind: ft.kind,
+        text: ft.text,
+        fullText: ft.fullText,
+        clientX: sc.clientX,
+        clientY: sc.clientY,
+        remainingSec: Number(ft.remainingSec.toFixed(2)),
+      };
+    });
+
     return {
       webgl2: this.isWebGL2,
       drawCalls: this._lastDrawCalls,
       triangles: this._lastTriangles,
       cameraDistance: Number(this.cameraDistance.toFixed(2)),
+      baseCameraDistance: Number((this.baseCameraDistance || 19.6).toFixed(2)),
+      cameraZoomRatio: Number((this.cameraZoomRatio || 1.0).toFixed(3)),
+      cameraPunchActive: Boolean(this.cameraPunchState.active),
+      cameraFollowActive: Boolean(this.cameraFollowActive),
       cameraFov: this.camera.fov,
       viewportWidth: this.viewportWidth,
       viewportHeight: this.viewportHeight,
       highlightedPlaneCount: highlightedPlanes.length,
       highlightedPlanes,
+      ghostPreviewCount: ghostPreviews.length,
+      ghostPreviews,
+      activeFloatingTexts,
+      activeSmokePuffCount: fxDiag.activeSmokePuffCount,
+      activeFireworkCount: fxDiag.activeFireworkCount,
+      flySpeedLinesActive: fxDiag.flySpeedLinesActive,
+      dieScale: this.boardBundle.getDieScale(),
+      timeScale: simSnap?.timeScale ?? 1.0,
     };
   }
 

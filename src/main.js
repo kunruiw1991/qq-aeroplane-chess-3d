@@ -125,6 +125,13 @@ function bootstrapApp() {
       uiScreen,
       pendingEvents: eventsBatch,
     });
+    if (uiScreen === SCREEN_IDS.PLAYING && currentSimSnapshot) {
+      hud.updateHud(
+        currentSimSnapshot,
+        audio.isMuted(),
+        renderer.getDiagnostics(currentSimSnapshot)
+      );
+    }
     const t1 = performance.now();
     lastRenderEndMs = t1;
     lastRenderCostMs = t1 - t0;
@@ -183,7 +190,11 @@ function bootstrapApp() {
   }
 
   function syncSnapshotAndEvents(snap) {
+    const hadActiveAnim = Boolean(currentSimSnapshot?.activeAnimation);
     currentSimSnapshot = snap;
+    if (hadActiveAnim && !snap.activeAnimation) {
+      screenNeedsSyncRender = true;
+    }
     if (Array.isArray(snap.events) && snap.events.length > 0) {
       for (const ev of snap.events) {
         pendingVisualEvents.push(ev);
@@ -192,11 +203,16 @@ function bootstrapApp() {
         pendingVisualEvents.splice(0, pendingVisualEvents.length - 96);
       }
       audio.consumeEvents(snap.events);
+      screenNeedsSyncRender = true;
     }
     if (snap.phase === MATCH_PHASES.FINISHED && uiScreen !== SCREEN_IDS.PODIUM) {
       transitionToPodium();
     } else if (uiScreen === SCREEN_IDS.PLAYING) {
-      hud.updateHud(currentSimSnapshot, audio.isMuted());
+      hud.updateHud(
+        currentSimSnapshot,
+        audio.isMuted(),
+        renderer.getDiagnostics(currentSimSnapshot)
+      );
     }
   }
 
@@ -361,8 +377,6 @@ function bootstrapApp() {
       seed,
     });
 
-    selectedConfig.modeId = simEngine.modeId;
-    selectedConfig.takeoffRule = simEngine.takeoffRule;
     lastRestartOptions = {
       modeId: simEngine.modeId,
       takeoffRule: simEngine.takeoffRule,

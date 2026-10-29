@@ -292,6 +292,7 @@ function buildSingleChibiPlaneMesh(colorIndex, planeIndex) {
   return {
     group,
     modelRoot,
+    bodyMat,
     propellerGroup,
     stackBadgeGroup,
     stackOrbs,
@@ -303,8 +304,32 @@ function buildSingleChibiPlaneMesh(colorIndex, planeIndex) {
     colorIndex,
     planeIndex,
     globalPlaneIndex: globalIndex,
+    isBestHint: false,
   };
 }
+
+function buildGhostMiniPlaneMesh(ghostMat) {
+  const g = new THREE.Group();
+  const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.18, 0.34, 8, 12), ghostMat);
+  body.rotation.x = Math.PI / 2;
+  body.position.y = 0.28;
+  const wing = new THREE.Mesh(new THREE.BoxGeometry(0.88, 0.05, 0.24), ghostMat);
+  wing.position.set(0, 0.28, 0.04);
+  const tail = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.22, 0.20), ghostMat);
+  tail.position.set(0, 0.40, -0.26);
+  g.add(body, wing, tail);
+  return g;
+}
+
+const OUTCOME_COLORS = Object.freeze({
+  capture: '#ef4444',
+  home: '#fbbf24',
+  fly: '#38bdf8',
+  jump: '#4ade80',
+  bounce: '#fb923c',
+  takeoff: '#a855f7',
+  advance: '#38bdf8',
+});
 
 export function buildAllPlanesAndEffectsGroup() {
   const root = new THREE.Group();
@@ -322,45 +347,103 @@ export function buildAllPlanesAndEffectsGroup() {
     }
   }
 
-  // 4 Ghost Destination Preview Rings (shown for each legal move's target tile)
+  // 4 Ghost Destination Preview Rings + Translucent 3D Ghost Planes
   const destRingsGroup = new THREE.Group();
   const destRings = [];
-  const destRingMat = makePlaneMat('#38bdf8', {
-    roughness: 0.20,
-    metalness: 0.15,
-    emissive: '#0ea5e9',
-    emissiveIntensity: 0.55,
-  });
   for (let i = 0; i < 4; i += 1) {
+    const ringMat = makePlaneMat('#38bdf8', {
+      roughness: 0.20,
+      metalness: 0.15,
+      emissive: '#0ea5e9',
+      emissiveIntensity: 0.60,
+      transparent: true,
+      opacity: 0.88,
+    });
+    const ghostMat = makePlaneMat('#38bdf8', {
+      roughness: 0.22,
+      metalness: 0.12,
+      emissive: '#38bdf8',
+      emissiveIntensity: 0.50,
+      transparent: true,
+      opacity: 0.58,
+    });
+    const hintHaloMat = makePlaneMat('#fbbf24', {
+      roughness: 0.18,
+      metalness: 0.18,
+      emissive: '#f59e0b',
+      emissiveIntensity: 0.75,
+      transparent: true,
+      opacity: 0.92,
+    });
     const rg = new THREE.Group();
     rg.visible = false;
     const torus = new THREE.Mesh(
-      new THREE.TorusGeometry(0.46, 0.055, 12, 26),
-      destRingMat
+      new THREE.TorusGeometry(0.48, 0.065, 12, 28),
+      ringMat
     );
     torus.rotation.x = Math.PI / 2;
     torus.position.y = 0.14;
-    const beacon = new THREE.Mesh(
-      new THREE.OctahedronGeometry(0.14, 0),
-      destRingMat
+
+    const hintHalo = new THREE.Mesh(
+      new THREE.TorusGeometry(0.64, 0.05, 10, 28),
+      hintHaloMat
     );
-    beacon.position.y = 0.42;
-    rg.add(torus, beacon);
+    hintHalo.rotation.x = Math.PI / 2;
+    hintHalo.position.y = 0.16;
+    hintHalo.visible = false;
+
+    const beacon = new THREE.Mesh(
+      new THREE.OctahedronGeometry(0.16, 0),
+      ringMat
+    );
+    beacon.position.y = 0.72;
+
+    const ghostPlane = buildGhostMiniPlaneMesh(ghostMat);
+
+    const ghostHit = new THREE.Mesh(
+      new THREE.SphereGeometry(0.75, 10, 10),
+      new THREE.MeshBasicMaterial({
+        color: 0xffffff,
+        transparent: true,
+        opacity: 0.0,
+        depthWrite: false,
+      })
+    );
+    ghostHit.position.y = 0.42;
+    ghostHit.userData = {
+      isGhostDestination: true,
+      ghostSlotIndex: i,
+      colorIndex: 0,
+      planeIndex: 0,
+    };
+
+    rg.add(torus, hintHalo, beacon, ghostPlane, ghostHit);
     destRingsGroup.add(rg);
-    destRings.push({ group: rg, torus, beacon });
+    raycastTargets.push(ghostHit);
+    destRings.push({
+      group: rg,
+      torus,
+      hintHalo,
+      beacon,
+      ghostPlane,
+      ghostHit,
+      ringMat,
+      ghostMat,
+      meta: null,
+    });
   }
   root.add(destRingsGroup);
 
   // Firework Particle Pool for Captures & Goal Crowns
   const particleGroup = new THREE.Group();
   const particles = [];
-  const particleGeo = new THREE.SphereGeometry(0.085, 8, 8);
-  for (let i = 0; i < 32; i += 1) {
+  const particleGeo = new THREE.SphereGeometry(0.095, 8, 8);
+  for (let i = 0; i < 48; i += 1) {
     const mat = makePlaneMat('#fbbf24', {
       roughness: 0.2,
       metalness: 0.1,
       emissive: '#f59e0b',
-      emissiveIntensity: 0.6,
+      emissiveIntensity: 0.65,
     });
     const mesh = new THREE.Mesh(particleGeo, mat);
     mesh.visible = false;
@@ -376,35 +459,120 @@ export function buildAllPlanesAndEffectsGroup() {
   }
   root.add(particleGroup);
 
-  function spawnFireworkBurst(x, z, colorHex = '#fbbf24') {
-    const col = new THREE.Color(colorHex);
+  // Smoke Puff Pool for Captured Planes Spinning Back to Hangar
+  const smokeGroup = new THREE.Group();
+  const smokeParticles = [];
+  const smokeGeo = new THREE.SphereGeometry(0.15, 10, 8);
+  for (let i = 0; i < 36; i += 1) {
+    const mat = makePlaneMat('#e2e8f0', {
+      roughness: 0.55,
+      metalness: 0.04,
+      emissive: '#94a3b8',
+      emissiveIntensity: 0.25,
+      transparent: true,
+      opacity: 0.78,
+    });
+    const mesh = new THREE.Mesh(smokeGeo, mat);
+    mesh.visible = false;
+    smokeGroup.add(mesh);
+    smokeParticles.push({
+      mesh,
+      active: false,
+      vx: 0,
+      vy: 0,
+      vz: 0,
+      life: 0,
+      maxLife: 0.55,
+    });
+  }
+  root.add(smokeGroup);
+
+  // 3D Wind Speed Lines Group for Fly-Across Shortcut (18 -> 30)
+  const speedLinesGroup = new THREE.Group();
+  speedLinesGroup.visible = false;
+  const speedLineMeshes = [];
+  const speedLineMat = makePlaneMat('#e0f2fe', {
+    roughness: 0.15,
+    metalness: 0.10,
+    emissive: '#38bdf8',
+    emissiveIntensity: 0.85,
+    transparent: true,
+    opacity: 0.85,
+  });
+  const speedLineGeo = new THREE.CylinderGeometry(0.025, 0.004, 1.45, 6);
+  speedLineGeo.rotateX(Math.PI / 2);
+  for (let i = 0; i < 10; i += 1) {
+    const sl = new THREE.Mesh(speedLineGeo, speedLineMat);
+    const angle = (i / 10) * Math.PI * 2;
+    const rad = 0.38 + (i % 3) * 0.16;
+    sl.position.set(Math.cos(angle) * rad, Math.sin(angle) * rad * 0.55 + 0.38, -0.75 - (i % 4) * 0.28);
+    speedLinesGroup.add(sl);
+    speedLineMeshes.push({ mesh: sl, baseZ: sl.position.z, phase: i * 0.7 });
+  }
+  root.add(speedLinesGroup);
+
+  let smokeSpawnAccum = 0;
+  let activeFlyingPlaneWorldPos = null;
+  let lastCaptureImpact = null;
+
+  function spawnFireworkBurst(x, z, colorHex = '#fbbf24', count = 14) {
+    const palette =
+      colorHex === 'multi'
+        ? ['#fbbf24', '#ef4444', '#38bdf8', '#10b981', '#f472b6']
+        : [colorHex];
     let spawned = 0;
     for (const pt of particles) {
       if (pt.active) continue;
-      const angle = (spawned / 10) * Math.PI * 2;
-      const speed = 2.2 + (spawned % 3) * 0.9;
+      const col = new THREE.Color(palette[spawned % palette.length]);
+      const angle = (spawned / count) * Math.PI * 2;
+      const speed = 2.4 + (spawned % 4) * 0.95;
       pt.active = true;
-      pt.life = 0.55;
+      pt.life = 0.68;
       pt.mesh.visible = true;
-      pt.mesh.position.set(x, 0.45, z);
+      pt.mesh.position.set(x, 0.48, z);
       pt.mesh.material.color.copy(col);
       pt.mesh.material.emissive.copy(col);
       pt.vx = Math.cos(angle) * speed;
-      pt.vy = 2.8 + (spawned % 4) * 0.6;
+      pt.vy = 3.1 + (spawned % 4) * 0.65;
       pt.vz = Math.sin(angle) * speed;
       spawned += 1;
-      if (spawned >= 10) break;
+      if (spawned >= count) break;
+    }
+  }
+
+  function spawnSmokePuff(x, y, z, burstCount = 1) {
+    let spawned = 0;
+    for (const sp of smokeParticles) {
+      if (sp.active) continue;
+      const jitterX = ((spawned * 37) % 10 - 5) * 0.025;
+      const jitterZ = ((spawned * 53) % 10 - 5) * 0.025;
+      sp.active = true;
+      sp.maxLife = 0.52;
+      sp.life = 0.52;
+      sp.mesh.visible = true;
+      sp.mesh.position.set(x + jitterX, Math.max(0.18, y), z + jitterZ);
+      sp.mesh.scale.setScalar(0.55);
+      sp.mesh.material.opacity = 0.80;
+      sp.vx = jitterX * 1.4;
+      sp.vy = 0.75 + (spawned % 3) * 0.25;
+      sp.vz = jitterZ * 1.4;
+      spawned += 1;
+      if (spawned >= burstCount) break;
     }
   }
 
   function updatePlanesAndEffects(simSnap, timeSec, dtSec, pendingEvents = []) {
-    // Trigger firework bursts on capture or goal events
+    // Trigger firework bursts & smoke puffs on capture or goal events
     if (Array.isArray(pendingEvents)) {
       for (const ev of pendingEvents) {
         if (ev.type === 'plane_capture' || ev.type === 'runway_capture') {
-          spawnFireworkBurst(ev.x || 0, ev.z || 0, '#ef4444');
+          const cx = ev.x ?? 0;
+          const cz = ev.z ?? 0;
+          spawnFireworkBurst(cx, cz, '#ef4444', 16);
+          spawnSmokePuff(cx, 0.36, cz, 5);
+          lastCaptureImpact = { x: cx, z: cz, timeSec };
         } else if (ev.type === 'plane_goal') {
-          spawnFireworkBurst(0, 0, '#fbbf24');
+          spawnFireworkBurst(0, 0, 'multi', 24);
         }
       }
     }
@@ -422,14 +590,41 @@ export function buildAllPlanesAndEffectsGroup() {
       pt.mesh.position.y += pt.vy * dtSec;
       pt.mesh.position.z += pt.vz * dtSec;
       pt.vy -= 7.5 * dtSec;
-      pt.mesh.scale.setScalar(Math.max(0.1, pt.life * 1.8));
+      pt.mesh.scale.setScalar(Math.max(0.1, pt.life * 2.0));
     }
+
+    // Update smoke puff particles
+    for (const sp of smokeParticles) {
+      if (!sp.active) continue;
+      sp.life -= dtSec;
+      if (sp.life <= 0) {
+        sp.active = false;
+        sp.mesh.visible = false;
+        continue;
+      }
+      const norm = 1 - sp.life / sp.maxLife;
+      sp.mesh.position.x += sp.vx * dtSec;
+      sp.mesh.position.y += sp.vy * dtSec;
+      sp.mesh.position.z += sp.vz * dtSec;
+      sp.mesh.scale.setScalar(0.55 + norm * 1.15);
+      sp.mesh.material.opacity = Math.max(0.05, (1 - norm) * 0.78);
+    }
+
+    activeFlyingPlaneWorldPos = null;
+    speedLinesGroup.visible = false;
 
     if (!simSnap || !Array.isArray(simSnap.planes)) return;
 
     const currentPlayer = simSnap.currentPlayer;
     const legalSet = new Set(simSnap.legalPlaneIndices || []);
+    const legalMovesByPlane = new Map();
+    if (Array.isArray(simSnap.legalMoves)) {
+      for (const m of simSnap.legalMoves) {
+        legalMovesByPlane.set(m.planeIndex, m);
+      }
+    }
     const activeAnim = simSnap.activeAnimation;
+    smokeSpawnAccum += dtSec;
 
     // Update all 16 planes
     for (let i = 0; i < planeEntries.length; i += 1) {
@@ -442,16 +637,30 @@ export function buildAllPlanesAndEffectsGroup() {
         simSnap.turnPhase === 'await_move' &&
         isCurrentPlayersPlane &&
         legalSet.has(pState.planeIndex);
+      const moveMeta = isLegalMove ? legalMovesByPlane.get(pState.planeIndex) : null;
+      const isBestHint = Boolean(moveMeta && moveMeta.isBestHint);
+      entry.isBestHint = isBestHint;
 
       // Spin propeller faster when flying or legal
-      const propSpeed = isLegalMove ? 24 : pState.state === PLANE_STATES.HANGAR ? 5 : 14;
+      const propSpeed = isLegalMove ? (isBestHint ? 32 : 24) : pState.state === PLANE_STATES.HANGAR ? 5 : 14;
       entry.propellerGroup.rotation.z += dtSec * propSpeed;
+
+      // Emissive glow on legal planes (brighter pulse on best-scored hint plane)
+      if (isLegalMove) {
+        const glowPulse = isBestHint
+          ? 0.58 + 0.28 * Math.sin(timeSec * 9.0)
+          : 0.36 + 0.16 * Math.sin(timeSec * 6.0);
+        entry.bodyMat.emissiveIntensity = glowPulse;
+      } else {
+        entry.bodyMat.emissiveIntensity = 0.12;
+      }
 
       // Determine position (interpolated along parabolic hop waypoints, captured return arc, or settled)
       let posX = pState.x;
       let posY = 0.14;
       let posZ = pState.z;
       let targetYaw = Math.atan2(-posX, -posZ);
+      let targetPitch = 0;
 
       const capturedEntry =
         activeAnim && Array.isArray(activeAnim.capturedPlanes)
@@ -470,27 +679,44 @@ export function buildAllPlanesAndEffectsGroup() {
         const b = wps[segIdx + 1];
         posX = a.x + (b.x - a.x) * localT;
         posZ = a.z + (b.z - a.z) * localT;
-        const arcPeak = b.kind === 'fly_mid' || b.kind === 'fly_land' ? 1.55 : b.kind === 'jump' ? 1.05 : 0.65;
+        const isFlySeg = b.kind === 'fly_mid' || b.kind === 'fly_land';
+        const arcPeak = isFlySeg ? 1.75 : b.kind === 'jump' ? 1.15 : 0.65;
         posY = 0.14 + Math.sin(localT * Math.PI) * arcPeak;
         if (Math.hypot(b.x - a.x, b.z - a.z) > 0.01) {
           targetYaw = Math.atan2(b.x - a.x, b.z - a.z);
         }
+        if (activeAnim.didFly) {
+          activeFlyingPlaneWorldPos = { x: posX, y: posY, z: posZ, yaw: targetYaw };
+          speedLinesGroup.visible = true;
+          speedLinesGroup.position.set(posX, posY, posZ);
+          speedLinesGroup.rotation.y = targetYaw;
+          for (const sl of speedLineMeshes) {
+            sl.mesh.position.z = sl.baseZ - ((timeSec * 12 + sl.phase) % 0.9);
+          }
+        }
       } else if (capturedEntry && activeAnim) {
-        // Animate captured plane spiraling along a high parabolic arc back to its Hangar slot!
+        // Animate captured plane spinning back to its Hangar slot trailing smoke puffs!
         const progress = Math.min(
           1,
           Math.max(0, activeAnim.elapsedFrames / Math.max(1, activeAnim.totalFrames))
         );
         posX = capturedEntry.prevX + (pState.x - capturedEntry.prevX) * progress;
         posZ = capturedEntry.prevZ + (pState.z - capturedEntry.prevZ) * progress;
-        posY = 0.14 + Math.sin(progress * Math.PI) * 2.25;
-        targetYaw = progress * Math.PI * 6.0;
+        posY = 0.14 + Math.sin(progress * Math.PI) * 2.45;
+        targetYaw = progress * Math.PI * 8.0;
+        targetPitch = Math.sin(progress * Math.PI * 6.0) * 0.42;
+        if (smokeSpawnAccum >= 0.025 && progress < 0.95) {
+          smokeSpawnAccum = 0;
+          spawnSmokePuff(posX, posY + 0.15, posZ, 1);
+        }
       } else if (isLegalMove) {
-        posY = 0.20 + Math.abs(Math.sin(timeSec * 5.5 + i)) * 0.14;
+        const bobAmp = isBestHint ? 0.22 : 0.14;
+        const bobFreq = isBestHint ? 7.5 : 5.5;
+        posY = 0.22 + Math.abs(Math.sin(timeSec * bobFreq + i)) * bobAmp;
       }
 
       entry.group.position.set(posX, posY, posZ);
-      entry.modelRoot.rotation.y = targetYaw;
+      entry.modelRoot.rotation.set(targetPitch, targetYaw, 0);
 
       // Crown visibility
       entry.crownGroup.visible = Boolean(pState.crowned || pState.state === PLANE_STATES.GOAL);
@@ -517,29 +743,93 @@ export function buildAllPlanesAndEffectsGroup() {
       // Legal move 3D ring & bouncing arrow
       entry.legalHighlightGroup.visible = isLegalMove;
       if (isLegalMove) {
-        const s = 1.0 + 0.14 * Math.sin(timeSec * 7.0);
+        const baseScale = isBestHint ? 1.24 : 1.0;
+        const s = baseScale * (1.0 + 0.16 * Math.sin(timeSec * (isBestHint ? 9.0 : 7.0)));
         entry.goldRing.scale.set(s, s, 1);
-        entry.arrowPointer.position.y = 1.44 + Math.sin(timeSec * 6.5) * 0.15;
-        entry.arrowPointer.rotation.y = timeSec * 3.0;
+        entry.arrowPointer.scale.setScalar(isBestHint ? 1.25 : 1.0);
+        entry.arrowPointer.position.y = 1.44 + Math.sin(timeSec * (isBestHint ? 8.5 : 6.5)) * 0.18;
+        entry.arrowPointer.rotation.y = timeSec * 3.2;
       }
     }
 
-    // Update Ghost Destination Rings for legal moves
-    const moves = simSnap.turnPhase === 'await_move' ? (simSnap.legalMoves || []) : [];
-    for (let i = 0; i < destRings.length; i += 1) {
-      const dr = destRings[i];
-      if (i < moves.length) {
-        const mv = moves[i];
-        dr.group.visible = true;
-        dr.group.position.set(mv.destX, 0, mv.destZ);
-        const pulse = 0.92 + 0.14 * Math.sin(timeSec * 6.0 + i);
-        dr.torus.scale.set(pulse, pulse, 1);
-        dr.beacon.position.y = 0.42 + Math.sin(timeSec * 5.5 + i) * 0.10;
-        dr.beacon.rotation.y = timeSec * 2.8;
-      } else {
-        dr.group.visible = false;
+    // Update Ghost Destination Previews for legal moves (deduplicated by target tile, keeping best hint)
+    const rawMoves = simSnap.turnPhase === 'await_move' ? (simSnap.legalMoves || []) : [];
+    const sortedMoves = rawMoves.slice().sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
+    const uniqueMoves = [];
+    const seenDestKeys = new Set();
+    for (const mv of sortedMoves) {
+      const key = `${mv.toState}:${mv.toRelStep}`;
+      if (!seenDestKeys.has(key)) {
+        seenDestKeys.add(key);
+        uniqueMoves.push(mv);
       }
     }
+
+    for (let i = 0; i < destRings.length; i += 1) {
+      const dr = destRings[i];
+      if (i < uniqueMoves.length) {
+        const mv = uniqueMoves[i];
+        const colHex = OUTCOME_COLORS[mv.outcomeType] || '#38bdf8';
+        dr.ringMat.color.set(colHex);
+        dr.ringMat.emissive.set(colHex);
+        dr.ghostMat.color.set(colHex);
+        dr.ghostMat.emissive.set(colHex);
+
+        dr.group.visible = true;
+        dr.group.position.set(mv.destX, 0, mv.destZ);
+
+        const isHint = Boolean(mv.isBestHint);
+        dr.hintHalo.visible = isHint;
+        const pulse = (isHint ? 1.15 : 0.94) + (isHint ? 0.20 : 0.12) * Math.sin(timeSec * (isHint ? 8.5 : 6.0) + i);
+        dr.torus.scale.set(pulse, pulse, 1);
+        if (isHint) {
+          const haloPulse = 1.06 + 0.16 * Math.cos(timeSec * 8.5);
+          dr.hintHalo.scale.set(haloPulse, haloPulse, 1);
+        }
+        dr.beacon.position.y = 0.78 + Math.sin(timeSec * 6.5 + i) * 0.12;
+        dr.beacon.rotation.y = timeSec * 3.2;
+
+        dr.ghostPlane.position.y = 0.08 + Math.abs(Math.sin(timeSec * 5.5 + i)) * 0.12;
+        dr.ghostPlane.rotation.y = Math.atan2(-mv.destX, -mv.destZ);
+        dr.ghostPlane.scale.setScalar(isHint ? 1.18 : 1.0);
+
+        dr.ghostHit.userData.colorIndex = simSnap.currentPlayer;
+        dr.ghostHit.userData.planeIndex = mv.planeIndex;
+        dr.ghostHit.userData.globalPlaneIndex = mv.globalPlaneIndex;
+        dr.meta = {
+          planeIndex: mv.planeIndex,
+          globalPlaneIndex: mv.globalPlaneIndex,
+          destX: mv.destX,
+          destZ: mv.destZ,
+          outcomeType: mv.outcomeType || 'advance',
+          outcomeIcon: mv.outcomeIcon || '✈️',
+          outcomeLabel: mv.outcomeLabel || '',
+          isBestHint: isHint,
+          score: mv.score ?? 0,
+        };
+      } else {
+        dr.group.visible = false;
+        dr.meta = null;
+      }
+    }
+  }
+
+  function getEffectDiagnostics() {
+    const activeSmokePuffs = smokeParticles.filter((s) => s.active).length;
+    const activeFireworks = particles.filter((p) => p.active).length;
+    const activeGhosts = destRings
+      .filter((d) => d.group.visible && d.meta)
+      .map((d) => ({ ...d.meta }));
+    return {
+      activeSmokePuffCount: activeSmokePuffs,
+      activeFireworkCount: activeFireworks,
+      flySpeedLinesActive: Boolean(speedLinesGroup.visible),
+      activeFlyingPlaneWorldPos: activeFlyingPlaneWorldPos
+        ? { ...activeFlyingPlaneWorldPos }
+        : null,
+      lastCaptureImpact: lastCaptureImpact ? { ...lastCaptureImpact } : null,
+      activeGhosts,
+    };
   }
 
   return {
@@ -548,5 +838,6 @@ export function buildAllPlanesAndEffectsGroup() {
     raycastTargets,
     destRings,
     updatePlanesAndEffects,
+    getEffectDiagnostics,
   };
 }

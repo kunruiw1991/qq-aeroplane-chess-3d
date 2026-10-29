@@ -265,7 +265,7 @@ body {
 }
 
 /* ==========================================================================
-   3. Active Gameplay HUD Screen
+   3. Active Gameplay HUD Screen (Kid HUD Overhaul)
    ========================================================================== */
 .screen-playing {
   display: flex;
@@ -278,63 +278,115 @@ body {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 10px;
+  gap: 12px;
   width: 100%;
+  z-index: 4;
 }
 
 .hud-roster-strip {
   pointer-events: none;
   display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  max-width: 48%;
+  flex-wrap: nowrap;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 6px;
 }
 
 .roster-chip {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
-  padding: 5px 10px;
+  gap: 6px;
+  padding: 6px 12px;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.88);
-  border: 2.5px solid #ffffff;
-  font-size: 13px;
+  background: rgba(255, 255, 255, 0.92);
+  border: 3px solid #ffffff;
+  font-size: 16px;
   font-weight: 900;
-  color: #1e293b;
-  box-shadow: 0 4px 10px rgba(15, 23, 42, 0.14);
+  color: #0f172a;
+  white-space: nowrap;
+  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.16);
+  transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.2s ease;
+  transform-origin: center center;
 }
 
 .roster-chip.active-turn {
   border-color: var(--chip-color, #ef4444);
   background: #ffffff;
-  transform: scale(1.05);
+  transform: scale(1.3);
+  z-index: 5;
+  box-shadow:
+    0 0 0 3px rgba(255, 255, 255, 0.9),
+    0 8px 20px rgba(15, 23, 42, 0.28);
 }
 
-.chip-dot {
-  width: 11px;
-  height: 11px;
+.avatar-plane-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
   border-radius: 50%;
   background: var(--chip-color, #ef4444);
+  color: #ffffff;
+  font-size: 14px;
+  box-shadow: inset 0 2px 3px rgba(255, 255, 255, 0.45);
 }
 
-.hud-coach-pill {
+.avatar-propeller {
+  position: absolute;
+  top: -5px;
+  right: -5px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #fef08a;
+  color: #b45309;
+  font-size: 11px;
+  line-height: 14px;
+  text-align: center;
+  font-weight: 900;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.3);
+}
+
+.avatar-propeller.spinning {
+  animation: propSpin 0.45s linear infinite;
+}
+
+@keyframes propSpin {
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
+}
+
+.hud-coach-pill,
+.message-banner {
   pointer-events: none;
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  padding: 8px 16px;
+  padding: 8px 14px;
   border-radius: 999px;
-  background: rgba(15, 23, 42, 0.82);
-  border: 2.5px solid rgba(255, 255, 255, 0.85);
+  background: rgba(15, 23, 42, 0.86);
+  border: 3px solid rgba(255, 255, 255, 0.9);
   color: #ffffff;
-  font-size: 14px;
-  font-weight: 800;
-  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.25);
-  max-width: 440px;
+  font-size: 16px;
+  font-weight: 900;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  box-shadow: 0 8px 22px rgba(15, 23, 42, 0.28);
+  max-width: 240px;
+  flex-shrink: 1;
 }
 
 .coach-die {
-  font-size: 20px;
+  display: inline-block;
+  font-size: 24px;
   color: #fbbf24;
   font-weight: 900;
 }
@@ -356,46 +408,328 @@ body {
   background: linear-gradient(180deg, #38bdf8 0%, #0284c7 100%);
 }
 
+/* ==========================================================================
+   3B. Ghost Destination Outcome Previews & Spectacle Floating FX
+   ========================================================================== */
+.hud-ghost-layer,
+.hud-fx-layer {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  overflow: hidden;
+  z-index: 2;
+}
+
+.hud-fx-layer.speed-lines-active::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: repeating-conic-gradient(
+    from 0deg at 50% 50%,
+    rgba(255, 255, 255, 0.0) 0deg 8deg,
+    rgba(224, 242, 254, 0.22) 8deg 10deg
+  );
+  mask-image: radial-gradient(circle at 50% 50%, transparent 44%, black 88%);
+  -webkit-mask-image: radial-gradient(circle at 50% 50%, transparent 44%, black 88%);
+  animation: speedPulse 0.24s ease-in-out infinite alternate;
+}
+
+@keyframes speedPulse {
+  from {
+    opacity: 0.55;
+    transform: scale(1.0);
+  }
+  to {
+    opacity: 0.95;
+    transform: scale(1.04);
+  }
+}
+
+.ghost-outcome-badge {
+  position: absolute;
+  transform: translate(-50%, -125%);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 11px;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.90);
+  border: 2.5px solid #ffffff;
+  color: #ffffff;
+  font-size: 16px;
+  font-weight: 900;
+  white-space: nowrap;
+  box-shadow: 0 6px 16px rgba(15, 23, 42, 0.35);
+}
+
+.ghost-outcome-badge.outcome-capture {
+  background: linear-gradient(180deg, #ef4444 0%, #b91c1c 100%);
+  border-color: #fef08a;
+}
+
+.ghost-outcome-badge.outcome-fly {
+  background: linear-gradient(180deg, #8b5cf6 0%, #6d28d9 100%);
+  border-color: #e0e7ff;
+}
+
+.ghost-outcome-badge.outcome-jump {
+  background: linear-gradient(180deg, #06b6d4 0%, #0e7490 100%);
+}
+
+.ghost-outcome-badge.outcome-home {
+  background: linear-gradient(180deg, #f59e0b 0%, #b45309 100%);
+  border-color: #fef08a;
+}
+
+.ghost-outcome-badge.outcome-bounce {
+  background: linear-gradient(180deg, #f97316 0%, #c2410c 100%);
+}
+
+.ghost-outcome-badge.is-best-hint {
+  border-color: #fde047;
+  box-shadow:
+    0 0 0 4px rgba(250, 204, 21, 0.55),
+    0 10px 24px rgba(15, 23, 42, 0.45);
+  animation: ghostBestPulse 0.65s ease-in-out infinite alternate;
+}
+
+@keyframes ghostBestPulse {
+  from {
+    transform: translate(-50%, -125%) scale(1.0);
+  }
+  to {
+    transform: translate(-50%, -138%) scale(1.16);
+  }
+}
+
+.floating-fx-text {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  padding: 8px 20px;
+  border-radius: 999px;
+  font-size: 32px;
+  font-weight: 900;
+  color: #ffffff;
+  text-shadow:
+    0 3px 0 #0f172a,
+    0 6px 14px rgba(15, 23, 42, 0.55);
+  white-space: nowrap;
+  animation: fxFloatPop 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.floating-fx-text.fx-capture {
+  background: linear-gradient(180deg, #ef4444 0%, #b91c1c 100%);
+  border: 4px solid #fef08a;
+  box-shadow: 0 12px 28px rgba(239, 68, 68, 0.55);
+}
+
+.floating-fx-text.fx-goal {
+  background: linear-gradient(180deg, #fbbf24 0%, #d97706 100%);
+  border: 4px solid #ffffff;
+  box-shadow: 0 12px 28px rgba(245, 158, 11, 0.55);
+}
+
+.floating-fx-text.fx-fly {
+  background: linear-gradient(180deg, #38bdf8 0%, #0284c7 100%);
+  border: 4px solid #ffffff;
+  box-shadow: 0 12px 28px rgba(2, 132, 199, 0.50);
+}
+
+@keyframes fxFloatPop {
+  0% {
+    transform: translate(-50%, -30%) scale(0.45);
+    opacity: 0;
+  }
+  100% {
+    transform: translate(-50%, -50%) scale(1.0);
+    opacity: 1;
+  }
+}
+
+/* ==========================================================================
+   3C. NO_MOVES Stamp ("没掷到5/6，起飞失败")
+   ========================================================================== */
+.no-moves-stamp {
+  pointer-events: none;
+  align-self: center;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  border-radius: 24px;
+  font-weight: 900;
+  z-index: 5;
+  animation: stampSlam 0.22s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.no-moves-stamp.big-human {
+  padding: 14px 28px;
+  font-size: 28px;
+  color: #ffffff;
+  background: linear-gradient(180deg, #f97316 0%, #dc2626 100%);
+  border: 4px solid #fef08a;
+  box-shadow: 0 14px 32px rgba(220, 38, 38, 0.45);
+}
+
+.no-moves-stamp.tiny-ai {
+  padding: 6px 16px;
+  font-size: 16px;
+  color: #fef08a;
+  background: rgba(15, 23, 42, 0.85);
+  border: 2.5px solid rgba(255, 255, 255, 0.8);
+  box-shadow: 0 6px 14px rgba(15, 23, 42, 0.28);
+}
+
+@keyframes stampSlam {
+  0% {
+    transform: scale(1.45) rotate(-4deg);
+    opacity: 0;
+  }
+  100% {
+    transform: scale(1.0) rotate(0deg);
+    opacity: 1;
+  }
+}
+
+/* ==========================================================================
+   3D. Kid HUD Bottom Area: "轮到你了!" Slide-in Banner + >=96px Roll Button
+   ========================================================================== */
+.hud-bottom-area {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  z-index: 4;
+}
+
+.your-turn-banner {
+  pointer-events: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 22px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #ef4444 0%, #f59e0b 50%, #10b981 100%);
+  border: 3px solid #ffffff;
+  color: #ffffff;
+  font-size: 20px;
+  font-weight: 900;
+  text-shadow: 0 2px 4px rgba(15, 23, 42, 0.4);
+  box-shadow: 0 8px 20px rgba(245, 158, 11, 0.38);
+}
+
+.your-turn-banner.slide-in {
+  animation: bannerSlideIn 0.28s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+@keyframes bannerSlideIn {
+  0% {
+    transform: translateY(24px) scale(0.85);
+    opacity: 0;
+  }
+  100% {
+    transform: translateY(0) scale(1.0);
+    opacity: 1;
+  }
+}
+
 .hud-bottom-dock {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 10px;
+  gap: 12px;
   width: 100%;
   flex-wrap: nowrap;
 }
 
 .hud-roll-btn {
-  min-width: 152px;
-  min-height: 74px;
-  padding: 10px 22px;
-  background: linear-gradient(180deg, #fbbf24 0%, #f59e0b 55%, #d97706 100%);
-  font-size: 21px;
+  min-width: 184px;
+  min-height: 98px;
+  padding: 12px 26px;
+  background: linear-gradient(180deg, #fde047 0%, #f59e0b 55%, #d97706 100%);
+  font-size: 24px;
+  border-width: 4px;
+}
+
+.hud-roll-btn.pulsing-roll {
+  animation: rollPulse 0.9s ease-in-out infinite alternate;
+}
+
+@keyframes rollPulse {
+  from {
+    transform: scale(1.0);
+    box-shadow:
+      0 6px 0 rgba(15, 23, 42, 0.22),
+      0 0 0 0 rgba(251, 191, 36, 0.65);
+  }
+  to {
+    transform: scale(1.05);
+    box-shadow:
+      0 8px 0 rgba(15, 23, 42, 0.24),
+      0 0 24px 6px rgba(251, 191, 36, 0.72);
+  }
 }
 
 .roll-die-icon {
-  font-size: 26px;
+  display: inline-block;
+  font-size: 42px;
+  line-height: 1;
+}
+
+.dice-stamp-pop {
+  animation: diceStampPop 0.34s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+@keyframes diceStampPop {
+  0% {
+    transform: scale(1.65) rotate(-12deg);
+  }
+  60% {
+    transform: scale(0.92) rotate(4deg);
+  }
+  100% {
+    transform: scale(1.0) rotate(0deg);
+  }
 }
 
 .hud-plane-btn {
-  min-width: 78px;
-  min-height: 72px;
-  padding: 8px 12px;
+  min-width: 98px;
+  min-height: 78px;
+  padding: 8px 14px;
   flex-direction: column;
-  gap: 2px;
-  border-radius: 22px;
+  gap: 3px;
+  border-radius: 24px;
   background: linear-gradient(180deg, var(--plane-color, #ef4444) 0%, #1e293b 160%);
 }
 
+.hud-plane-btn.best-move-hint {
+  border-color: #fde047;
+  box-shadow:
+    0 0 0 4px rgba(250, 204, 21, 0.65),
+    0 10px 22px rgba(15, 23, 42, 0.35);
+  animation: bestBtnPulse 0.7s ease-in-out infinite alternate;
+}
+
+@keyframes bestBtnPulse {
+  from {
+    transform: translateY(0) scale(1.0);
+  }
+  to {
+    transform: translateY(-3px) scale(1.06);
+  }
+}
+
 .plane-btn-num {
-  font-size: 14px;
+  font-size: 16px;
   font-weight: 900;
   white-space: nowrap;
 }
 
 .plane-btn-tag {
-  font-size: 12px;
-  font-weight: 800;
+  font-size: 14px;
+  font-weight: 900;
   color: #fef08a;
   white-space: nowrap;
 }
@@ -518,22 +852,35 @@ body {
     display: none;
   }
   .hud-roster-strip {
-    max-width: 56%;
+    flex-wrap: wrap;
+    flex-shrink: 1;
+    max-width: 58%;
+    gap: 8px;
   }
   .roster-chip {
-    padding: 3px 7px;
-    font-size: 11px;
+    padding: 4px 8px;
+    font-size: 16px;
+  }
+  .your-turn-banner {
+    padding: 5px 16px;
+    font-size: 17px;
+  }
+  .hud-bottom-dock {
+    gap: 8px;
   }
   .hud-plane-btn {
-    min-width: 70px;
-    min-height: 70px;
+    min-width: 82px;
+    min-height: 72px;
     padding: 6px 8px;
   }
   .hud-roll-btn {
-    min-width: 116px;
-    min-height: 70px;
-    padding: 8px 14px;
-    font-size: 17px;
+    min-width: 146px;
+    min-height: 96px;
+    padding: 10px 16px;
+    font-size: 20px;
+  }
+  .roll-die-icon {
+    font-size: 36px;
   }
 }
 
@@ -558,5 +905,22 @@ body {
   .btn-primary-xl {
     min-height: 68px;
     font-size: 20px;
+  }
+  .hud-coach-pill {
+    display: none;
+  }
+  .hud-roster-strip {
+    max-width: 72%;
+    flex-wrap: nowrap;
+    gap: 8px;
+  }
+  .your-turn-banner {
+    padding: 4px 16px;
+    font-size: 16px;
+  }
+  .hud-roll-btn {
+    min-width: 168px;
+    min-height: 96px;
+    padding: 8px 20px;
   }
 }

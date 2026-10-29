@@ -115,6 +115,7 @@ export const TEST_IDS = Object.freeze({
 
 export const EVENT_TYPES = Object.freeze({
   DICE_ROLL: 'dice_roll',
+  NO_MOVES: 'no_moves',
   PLANE_TAKEOFF: 'plane_takeoff',
   PLANE_HOP: 'plane_hop',
   PLANE_JUMP: 'plane_jump',
@@ -126,6 +127,17 @@ export const EVENT_TYPES = Object.freeze({
   PLANE_GOAL: 'plane_goal',
   TRIPLE_SIX: 'triple_six',
   MATCH_FINISH: 'match_finish',
+});
+
+export const PACE_CONSTANTS = Object.freeze({
+  AI_THINK_FRAMES: 6,
+  DICE_TUMBLE_FRAMES: 30,
+  HOP_FRAMES_PER_TILE: 8,
+  MAX_MOVE_FRAMES: 54,
+  NO_MOVES_PAUSE_FRAMES: 20,
+  SINGLE_MOVE_AUTO_FRAMES: 30,
+  CAPTURE_SLOWMO_SEC: 0.35,
+  CAPTURE_SLOWMO_SCALE: 0.3,
 });
 
 // Relative step constants for every player color (0..3):

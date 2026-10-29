@@ -44,10 +44,37 @@ A 3D WebGL2 remake of Tencent QQ Game Hall's classic **QQ飞行棋 (QQ Aeroplane
 
 ---
 
+## Changelog — Fun Overhaul (v1.1)
+
+The first release was *correct* but not *fun*: with the 5/6 takeoff rule a player could sit through a
+dead first minute (measured: 7 "no moves" rolls in a row), most human turns had a single legal move,
+and captures / flights happened without any spectacle. This overhaul fixes the feel:
+
+- **No dead first minute** — `fastStart`: every player begins with one plane on its launch pad and the
+  human's very first roll is guaranteed to be a takeoff die (5/6). Across 8 seeded sims the first human
+  move now happens at **0.7 s** (was up to 43.7 s) and the longest wait between human actions dropped
+  from a median **14.6 s to 6.9 s**; a quick 2-plane game lasts **2–3.7 min**.
+- **Snappier pace** — AI think `18f → 6f`, dice tumble `48f → 30f`, hop `12f → 8f` per tile (whole move
+  capped at 0.9 s), "no moves" pause `48f → 20f` with a big "没掷到5/6，起飞失败" stamp.
+- **Real choices** — legal planes glow and bob, ghost planes preview every destination with an outcome
+  badge (💥 击落 / ✈️ 飞棋 / 🦘 跳子 / ⭐ 到家 / ↩ 反弹 / 🛫 起飞), the best move pulses as a hint,
+  identical options are merged into one button, and planes (or their ghosts) can be tapped in 3D.
+- **Spectacle** — captures trigger 0.35 s slow-mo, a 15 % camera punch-in, "击落!" text and a smoking
+  spiral back to the hangar; the 18→30 fly-across is followed by the camera with speed lines and a
+  whoosh; crowning fires fireworks and a 3-note fanfare; the centre die is 1.6× larger with a stamp pop.
+- **Kid HUD** — "🌟 轮到你了!" banner, a ≥96 px pulsing 掷骰子 button ("✨ 帮我走" when choosing),
+  4 plane avatars with the active one enlarged, ≥16 px status pills, ≤5 controls on screen.
+- **Hall integration** — writes `localStorage['qq_hall_progress'].aeroplane` (plays / best rank / stars)
+  for the QQ Game Hall 3D progress badges.
+- E2E suite grown from 36 to 45 tests (pace budgets, fastStart, ghost previews, slow-mo, HUD caps,
+  single-row pills, 4-viewport zero-scroll).
+
+---
+
 ## Running & Verifying Locally
 
 ```bash
 python3 -m http.server 18802
-# Run the 36-test headless WebGL2 E2E suite:
+# Run the 45-test headless WebGL2 E2E suite:
 python3 tests/run_e2e.py
 ```

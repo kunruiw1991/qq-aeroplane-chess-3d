@@ -62,6 +62,10 @@ export class AudioSynth {
     this._sfxCount = 0;
     this._bgmStepCount = 0;
     this._unlockCallCount = 0;
+    this._diceTickCount = 0;
+    this._flyWhooshCount = 0;
+    this._captureSfxCount = 0;
+    this._fanfareCount = 0;
 
     this._stepIndex = 0;
     this._seqTimer = null;
@@ -309,17 +313,38 @@ export class AudioSynth {
     for (const ev of events) {
       if (!ev || !ev.type) continue;
       this._sfxCount += 1;
+      if (ev.type === EVENT_TYPES.DICE_ROLL) this._diceTickCount += 6;
+      else if (ev.type === EVENT_TYPES.PLANE_FLY) this._flyWhooshCount += 1;
+      else if (
+        ev.type === EVENT_TYPES.PLANE_CAPTURE ||
+        ev.type === EVENT_TYPES.RUNWAY_CAPTURE
+      ) {
+        this._captureSfxCount += 1;
+      } else if (ev.type === EVENT_TYPES.PLANE_GOAL) {
+        this._fanfareCount += 1;
+      }
+
       if (this._muted) continue;
       const ctx = this._ensureContext();
       if (!ctx || !this._sfxGain) continue;
       const now = ctx.currentTime;
 
       switch (ev.type) {
-        case EVENT_TYPES.DICE_ROLL:
-          // Crisp dice rattle clicks
-          this._scheduleTone(this._sfxGain, 520, 'triangle', now, 0.05, 0.18, 760);
-          this._scheduleTone(this._sfxGain, 680, 'triangle', now + 0.055, 0.05, 0.18, 920);
-          this._scheduleTone(this._sfxGain, 840, 'sine', now + 0.11, 0.07, 0.22, 1040);
+        case EVENT_TYPES.DICE_ROLL: {
+          // 6 rapid decelerating tumble tick clicks + 1.6x stamp pop chime
+          const tickOffsets = [0.0, 0.055, 0.115, 0.185, 0.265, 0.355];
+          for (let i = 0; i < tickOffsets.length; i += 1) {
+            const t = now + tickOffsets[i];
+            const f0 = 480 + i * 75;
+            this._scheduleTone(this._sfxGain, f0, 'triangle', t, 0.042, 0.18, f0 * 1.35);
+          }
+          this._scheduleTone(this._sfxGain, 880, 'sine', now + 0.43, 0.09, 0.25, 1174.66);
+          break;
+        }
+        case EVENT_TYPES.NO_MOVES:
+          // Gentle comic stamp thud ("没掷到5/6，起飞失败")
+          this._scheduleTone(this._sfxGain, 392, 'triangle', now, 0.09, 0.19, 293.66);
+          this._scheduleTone(this._sfxGain, 293.66, 'triangle', now + 0.095, 0.14, 0.20, 220);
           break;
         case EVENT_TYPES.PLANE_TAKEOFF:
           // Ascending propeller takeoff whoosh
@@ -327,22 +352,24 @@ export class AudioSynth {
           this._scheduleNoise(now, 0.14, 0.12);
           break;
         case EVENT_TYPES.PLANE_HOP:
-          this._scheduleTone(this._sfxGain, 587.33, 'sine', now, 0.09, 0.20, 783.99);
+          this._scheduleTone(this._sfxGain, 587.33, 'sine', now, 0.08, 0.20, 783.99);
           break;
         case EVENT_TYPES.PLANE_JUMP:
           this._scheduleTone(this._sfxGain, 523.25, 'triangle', now, 0.08, 0.22, 659.25);
           this._scheduleTone(this._sfxGain, 659.25, 'triangle', now + 0.07, 0.11, 0.24, 1046.5);
           break;
         case EVENT_TYPES.PLANE_FLY:
-          // Jet boost across dashed Fly-Across runway
-          this._scheduleNoise(now, 0.24, 0.18);
-          this._scheduleTone(this._sfxGain, 440, 'sawtooth', now, 0.22, 0.16, 1320);
-          this._scheduleTone(this._sfxGain, 880, 'triangle', now + 0.12, 0.18, 0.22, 1760);
+          // High-speed jet whoosh across dashed Fly-Across runway
+          this._scheduleNoise(now, 0.32, 0.24);
+          this._scheduleTone(this._sfxGain, 330, 'sawtooth', now, 0.28, 0.18, 1320);
+          this._scheduleTone(this._sfxGain, 660, 'triangle', now + 0.08, 0.24, 0.24, 1760);
           break;
         case EVENT_TYPES.PLANE_CAPTURE:
         case EVENT_TYPES.RUNWAY_CAPTURE:
-          this._scheduleNoise(now, 0.20, 0.25);
-          this._scheduleTone(this._sfxGain, 320, 'sawtooth', now, 0.22, 0.24, 95);
+          // Slow-mo impact punch + spiraling smoke whistle
+          this._scheduleNoise(now, 0.26, 0.28);
+          this._scheduleTone(this._sfxGain, 260, 'sawtooth', now, 0.24, 0.28, 65);
+          this._scheduleTone(this._sfxGain, 880, 'sine', now + 0.08, 0.32, 0.20, 220);
           break;
         case EVENT_TYPES.PLANE_STACK:
           this._scheduleTone(this._sfxGain, 659.25, 'sine', now, 0.08, 0.18, 880);
@@ -352,11 +379,18 @@ export class AudioSynth {
           this._scheduleTone(this._sfxGain, 620, 'triangle', now, 0.15, 0.22, 260);
           break;
         case EVENT_TYPES.PLANE_GOAL:
+          // 3-note brassy crown fanfare ("到家!") + firework sparkle
+          this._scheduleTone(this._sfxGain, 523.25, 'triangle', now, 0.11, 0.26);
+          this._scheduleTone(this._sfxGain, 659.25, 'triangle', now + 0.11, 0.11, 0.26);
+          this._scheduleTone(this._sfxGain, 783.99, 'triangle', now + 0.22, 0.28, 0.28);
+          this._scheduleTone(this._sfxGain, 1046.5, 'sawtooth', now + 0.22, 0.28, 0.16);
+          this._scheduleNoise(now + 0.22, 0.18, 0.12);
+          break;
         case EVENT_TYPES.MATCH_FINISH:
           this._scheduleTone(this._sfxGain, 523.25, 'triangle', now, 0.11, 0.24);
           this._scheduleTone(this._sfxGain, 659.25, 'triangle', now + 0.09, 0.11, 0.24);
           this._scheduleTone(this._sfxGain, 783.99, 'triangle', now + 0.18, 0.11, 0.24);
-          this._scheduleTone(this._sfxGain, 1046.5, 'triangle', now + 0.27, 0.25, 0.28);
+          this._scheduleTone(this._sfxGain, 1046.5, 'triangle', now + 0.27, 0.28, 0.28);
           break;
         case EVENT_TYPES.TRIPLE_SIX:
           this._scheduleTone(this._sfxGain, 440, 'square', now, 0.09, 0.14, 330);
@@ -375,6 +409,10 @@ export class AudioSynth {
       currentTrack: this._currentTrack,
       contextState: this._ctx ? this._ctx.state : 'uninitialized',
       sfxCount: this._sfxCount,
+      diceTickCount: this._diceTickCount,
+      flyWhooshCount: this._flyWhooshCount,
+      captureSfxCount: this._captureSfxCount,
+      fanfareCount: this._fanfareCount,
       bgmStepCount: this._bgmStepCount,
       unlockCallCount: this._unlockCallCount,
       sequencerActive: this._seqTimer !== null,

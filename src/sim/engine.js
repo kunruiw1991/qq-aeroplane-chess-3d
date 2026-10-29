@@ -28,6 +28,7 @@ import {
   HOME_ENTRY_REL_STEP,
   LAUNCHPAD_REL_STEP,
   MATCH_PHASES,
+  PACE_CONSTANTS,
   PLANE_STATES,
   POST_FLY_JUMP_REL_STEP,
   RUNWAY_INTERSECT_HOME_REL_STEP,
@@ -37,6 +38,42 @@ import {
   relStepToTrackIndex,
   resolvePlaneWorldCoords,
 } from '../contracts/constants.js';
+
+function recordAeroplaneHallProgress(humanRank, humanStars) {
+  try {
+    if (typeof window === 'undefined' || !window.localStorage) return;
+    const key = 'qq_hall_progress';
+    const raw = window.localStorage.getItem(key);
+    let root = {};
+    if (raw) {
+      try {
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+          root = parsed;
+        }
+      } catch (_) {
+        root = {};
+      }
+    }
+    const prev =
+      root.aeroplane && typeof root.aeroplane === 'object' ? root.aeroplane : {};
+    const prevPlays = Number.isFinite(Number(prev.plays)) ? Number(prev.plays) : 0;
+    const prevBest = Number.isFinite(Number(prev.best)) ? Number(prev.best) : 0;
+    const prevStars = Number.isFinite(Number(prev.stars)) ? Number(prev.stars) : 0;
+    const stars = Math.max(0, Math.min(3, Math.round(Number(humanStars) || 0)));
+    const won = humanRank === 1 ? 1 : 0;
+    const best = Math.max(prevBest + won, stars, 1);
+    root.aeroplane = {
+      plays: prevPlays + 1,
+      best,
+      stars: Math.max(prevStars, stars),
+      last: new Date().toISOString(),
+    };
+    window.localStorage.setItem(key, JSON.stringify(root));
+  } catch (_) {
+    // Ignore storage errors in restricted environments
+  }
+}
 
 function normalizeStateFromRelStep(relStep, explicitState = null) {
   if (explicitState && Object.values(PLANE_STATES).includes(explicitState)) {
@@ -132,6 +169,19 @@ export class AeroplaneSimEngine {
         ? Boolean(options.autoAdvanceSingleMove)
         : !hasTestOverrides;
 
+    // Fast-start default: every player begins with 1 plane on its launchpad
+    // AND the human's very first roll of a match is guaranteed to be a takeoff die (5 or 6).
+    // Both are exposed as options so legacy tests can disable them.
+    this.fastStart =
+      options.fastStart !== undefined
+        ? Boolean(options.fastStart)
+        : !Boolean(options.customPlaneStates);
+    this.guaranteedFirstTakeoff =
+      options.guaranteedFirstTakeoff !== undefined
+        ? Boolean(options.guaranteedFirstTakeoff)
+        : Boolean(this.fastStart);
+    this._humanFirstRollGuaranteedUsed = false;
+
     this.players = COLOR_IDS.map((colorId, c) => {
       const meta = COLOR_META[colorId];
       let isAi = true;
@@ -145,21 +195,28 @@ export class AeroplaneSimEngine {
         isAi = c >= humanCount;
       }
 
-      const planes = [0, 1, 2, 3].map((pIdx) => ({
-        id: `${colorId}_${pIdx}`,
-        globalIndex: c * 4 + pIdx,
-        colorIndex: c,
-        colorId,
-        planeIndex: pIdx,
-        state: PLANE_STATES.HANGAR,
-        relStep: HANGAR_REL_STEP,
-        trackIndex: -1,
-        stackCount: 1,
-        stackIndex: 0,
-        crowned: false,
-        x: BOARD_TOPOLOGY.hangars[c].slots[pIdx].x,
-        z: BOARD_TOPOLOGY.hangars[c].slots[pIdx].z,
-      }));
+      const planes = [0, 1, 2, 3].map((pIdx) => {
+        const startsOnLaunchpad = this.fastStart && pIdx === 0;
+        return {
+          id: `${colorId}_${pIdx}`,
+          globalIndex: c * 4 + pIdx,
+          colorIndex: c,
+          colorId,
+          planeIndex: pIdx,
+          state: startsOnLaunchpad ? PLANE_STATES.LAUNCHPAD : PLANE_STATES.HANGAR,
+          relStep: startsOnLaunchpad ? LAUNCHPAD_REL_STEP : HANGAR_REL_STEP,
+          trackIndex: -1,
+          stackCount: 1,
+          stackIndex: 0,
+          crowned: false,
+          x: startsOnLaunchpad
+            ? BOARD_TOPOLOGY.launchPads[c].x
+            : BOARD_TOPOLOGY.hangars[c].slots[pIdx].x,
+          z: startsOnLaunchpad
+            ? BOARD_TOPOLOGY.launchPads[c].z
+            : BOARD_TOPOLOGY.hangars[c].slots[pIdx].z,
+        };
+      });
 
       return {
         index: c,
@@ -194,6 +251,8 @@ export class AeroplaneSimEngine {
     this.turnNumber = 1;
     this.tick = 0;
     this.elapsedSec = 0;
+    this.timeScale = 1.0;
+    this.slowMoRemainingSec = 0;
 
     this.diceValue = null;
     this.lastDiceRoll = null;
@@ -201,6 +260,7 @@ export class AeroplaneSimEngine {
     this.bonusRoll = false;
     this.tripleSixCapped = false;
     this.tripleSixCount = 0;
+    this.noMovesStamp = null;
 
     this.legalPlaneIndices = [];
     this.legalMoves = [];
@@ -209,9 +269,12 @@ export class AeroplaneSimEngine {
     this.rankings = [];
     this.winnerColorIndex = null;
     this.winnerColorId = null;
+    this._hallProgressRecorded = false;
 
     this._phaseTimerFrames = 0;
-    this._aiThinkFrames = this.players[this.currentPlayer].isAi ? 18 : 0;
+    this._aiThinkFrames = this.players[this.currentPlayer].isAi
+      ? PACE_CONSTANTS.AI_THINK_FRAMES
+      : 0;
     this._singleMoveAutoTimer = 0;
     this._frameEvents = [];
 
@@ -658,17 +721,11 @@ export class AeroplaneSimEngine {
         moves.push(preview);
       }
     }
-    return moves;
+    return this._decorateAndScoreLegalMoves(moves);
   }
 
-  /**
-   * Smart Tactical AI move selector:
-   * Prioritizes Capture > Fly+Jump > Exact Goal Crown > Takeoff > Safe Advance.
-   */
-  chooseBestMoveForAi(legalMoves = this.legalMoves) {
-    if (!Array.isArray(legalMoves) || legalMoves.length === 0) return null;
-    if (legalMoves.length === 1) return legalMoves[0];
-
+  _decorateAndScoreLegalMoves(moves) {
+    if (!Array.isArray(moves) || moves.length === 0) return [];
     const player = this.players[this.currentPlayer];
     const activeOnBoard = player.planes.filter(
       (p) =>
@@ -678,10 +735,11 @@ export class AeroplaneSimEngine {
     ).length;
     const neededToWin = Math.max(1, this.planesToWin - player.crownedCount);
 
-    let bestMove = legalMoves[0];
     let bestScore = -Infinity;
+    let bestPlaneIndex = moves[0].planeIndex;
+    const seenEquivKeys = new Set();
 
-    for (const move of legalMoves) {
+    for (const move of moves) {
       let score = 0;
       if (move.allCaptureTargets.length > 0) {
         score += 950 * move.allCaptureTargets.length;
@@ -700,7 +758,7 @@ export class AeroplaneSimEngine {
         score += activeOnBoard < neededToWin ? 540 : 210;
       }
       if (move.bouncedBack) {
-        score -= 180;
+        score -= 420;
       }
       if (move.toState === PLANE_STATES.HOMESTRETCH) {
         score += 320 + move.toRelStep * 4;
@@ -710,13 +768,83 @@ export class AeroplaneSimEngine {
       if (move.formsFriendlyStack) {
         score += 65;
       }
+
+      let outcomeType = 'advance';
+      let outcomeIcon = '✈️';
+      let outcomeLabel = `前进+${move.diceValue}`;
+      if (move.allCaptureTargets.length > 0) {
+        outcomeType = 'capture';
+        outcomeIcon = '💥';
+        outcomeLabel = '击落!';
+      } else if (move.crowned) {
+        outcomeType = 'home';
+        outcomeIcon = '⭐';
+        outcomeLabel = '到家!';
+      } else if (move.didFly) {
+        outcomeType = 'fly';
+        outcomeIcon = '✈️';
+        outcomeLabel = move.didJump ? '飞棋+跳!' : '飞棋+12';
+      } else if (move.didJump) {
+        outcomeType = 'jump';
+        outcomeIcon = '🦘';
+        outcomeLabel = '跳子+4';
+      } else if (move.bouncedBack) {
+        outcomeType = 'bounce';
+        outcomeIcon = '↩';
+        outcomeLabel = '反弹';
+      } else if (move.toState === PLANE_STATES.HOMESTRETCH) {
+        outcomeType = 'home';
+        outcomeIcon = '⭐';
+        outcomeLabel = '冲刺走廊';
+      } else if (move.tookOff) {
+        outcomeType = 'takeoff';
+        outcomeIcon = '🛫';
+        outcomeLabel = '起飞';
+      }
+
+      // Dedupe equivalent moves (same destination & outcome, e.g. multiple hangar planes taking off
+      // or stacked planes advancing together): keep lowest planeIndex as isUniqueOutcome = true.
+      const equivKey = `${move.toState}:${move.toRelStep}:${outcomeType}`;
+      if (seenEquivKeys.has(equivKey)) {
+        move.isUniqueOutcome = false;
+        score -= 5;
+      } else {
+        seenEquivKeys.add(equivKey);
+        move.isUniqueOutcome = true;
+      }
+
+      move.score = score;
+      move.outcomeType = outcomeType;
+      move.outcomeIcon = outcomeIcon;
+      move.outcomeLabel = outcomeLabel;
+      move.isBestHint = false;
+
       if (score > bestScore) {
         bestScore = score;
-        bestMove = move;
+        bestPlaneIndex = move.planeIndex;
       }
     }
 
-    return bestMove;
+    for (const move of moves) {
+      move.isBestHint = move.planeIndex === bestPlaneIndex;
+    }
+
+    return moves;
+  }
+
+  /**
+   * Smart Tactical AI move selector:
+   * Prioritizes Capture > Fly+Jump > Exact Goal Crown > Takeoff > Safe Advance.
+   */
+  chooseBestMoveForAi(legalMoves = this.legalMoves) {
+    if (!Array.isArray(legalMoves) || legalMoves.length === 0) return null;
+    if (legalMoves.length === 1) return legalMoves[0];
+
+    const hinted = legalMoves.find((m) => m.isBestHint);
+    if (hinted) return hinted;
+
+    const decorated = this._decorateAndScoreLegalMoves(legalMoves);
+    return decorated.find((m) => m.isBestHint) || decorated[0];
   }
 
   /**
@@ -743,13 +871,35 @@ export class AeroplaneSimEngine {
 
     // Clear any residual animation from a prior move if caller invoked rollDice() directly
     this.activeAnimation = null;
+    this.noMovesStamp = null;
 
+    const activePlayer = this.players[this.currentPlayer];
     let rolled = null;
     if (this.forcedDiceQueue.length > 0) {
       rolled = this.forcedDiceQueue.shift();
+      if (!activePlayer.isAi) {
+        this._humanFirstRollGuaranteedUsed = true;
+      }
     }
     if (rolled === null) {
-      rolled = this.rng.nextDie();
+      if (
+        !activePlayer.isAi &&
+        this.guaranteedFirstTakeoff &&
+        !this._humanFirstRollGuaranteedUsed
+      ) {
+        this._humanFirstRollGuaranteedUsed = true;
+        const pool =
+          Array.isArray(this.takeoffDiceValues) && this.takeoffDiceValues.length > 0
+            ? this.takeoffDiceValues
+            : [5, 6];
+        const idx = Math.floor(this.rng.nextFloat() * pool.length) % pool.length;
+        rolled = pool[idx];
+      } else {
+        if (!activePlayer.isAi) {
+          this._humanFirstRollGuaranteedUsed = true;
+        }
+        rolled = this.rng.nextDie();
+      }
     }
 
     this.diceValue = rolled;
@@ -794,18 +944,34 @@ export class AeroplaneSimEngine {
       this.bonusRoll = false;
       this.consecutiveSixes = 0;
       this.turnPhase = TURN_PHASES.NO_MOVES;
-      this._phaseTimerFrames = 48;
+      this._phaseTimerFrames = PACE_CONSTANTS.NO_MOVES_PAUSE_FRAMES;
+      this.noMovesStamp = {
+        playerIndex: this.currentPlayer,
+        colorId: COLOR_IDS[this.currentPlayer],
+        isHuman: !activePlayer.isAi,
+        size: activePlayer.isAi ? 'tiny' : 'big',
+        diceValue: rolled,
+        text: '没掷到5/6，起飞失败',
+      };
+      this._frameEvents.push({
+        type: EVENT_TYPES.NO_MOVES,
+        playerIndex: this.currentPlayer,
+        colorId: COLOR_IDS[this.currentPlayer],
+        isHuman: !activePlayer.isAi,
+        diceValue: rolled,
+        text: '没掷到5/6，起飞失败',
+      });
     } else {
       this.turnPhase = TURN_PHASES.AWAIT_MOVE;
-      this._phaseTimerFrames = 48; // ~0.8s 3D dice tumble animation
+      this._phaseTimerFrames = PACE_CONSTANTS.DICE_TUMBLE_FRAMES;
       this._singleMoveAutoTimer =
-        !this.players[this.currentPlayer].isAi &&
+        !activePlayer.isAi &&
         this.autoAdvanceSingleMove &&
         this.legalMoves.length === 1
-          ? 54
+          ? PACE_CONSTANTS.SINGLE_MOVE_AUTO_FRAMES
           : 0;
-      if (this.players[this.currentPlayer].isAi) {
-        this._aiThinkFrames = 48; // Wait full ~0.8s dice tumble before AI moves
+      if (activePlayer.isAi) {
+        this._aiThinkFrames = PACE_CONSTANTS.DICE_TUMBLE_FRAMES;
       }
     }
 
@@ -968,14 +1134,29 @@ export class AeroplaneSimEngine {
       });
     }
 
-    // Build 3D animation trajectory descriptor (~0.2s = 12 frames per tile hop)
+    // Build 3D animation trajectory descriptor (8 frames per tile hop, whole move capped at 54 frames = 0.9s)
     const finalWaypoints = move.waypoints.map((wp, idx) =>
       idx === move.waypoints.length - 1
         ? { ...wp, x: plane.x, z: plane.z }
         : wp
     );
-    const hopFrames = Math.max(12, (finalWaypoints.length - 1) * 12);
-    const captureReturnFrames = capturedPlanes.length > 0 ? 24 : 0;
+    const segmentCount = Math.max(1, finalWaypoints.length - 1);
+    const rawHopFrames = Math.max(
+      PACE_CONSTANTS.HOP_FRAMES_PER_TILE,
+      segmentCount * PACE_CONSTANTS.HOP_FRAMES_PER_TILE
+    );
+    const captureReturnFrames = capturedPlanes.length > 0 ? 12 : 0;
+    const totalFrames = Math.min(
+      PACE_CONSTANTS.MAX_MOVE_FRAMES,
+      rawHopFrames + captureReturnFrames
+    );
+    const hopFrames = Math.min(totalFrames, rawHopFrames);
+
+    if (capturedPlanes.length > 0) {
+      this.slowMoRemainingSec = PACE_CONSTANTS.CAPTURE_SLOWMO_SEC;
+      this.timeScale = PACE_CONSTANTS.CAPTURE_SLOWMO_SCALE;
+    }
+
     this.activeAnimation = {
       colorIndex: move.colorIndex,
       planeIndex: move.planeIndex,
@@ -983,7 +1164,10 @@ export class AeroplaneSimEngine {
       waypoints: finalWaypoints,
       elapsedFrames: 0,
       hopFrames,
-      totalFrames: hopFrames + captureReturnFrames,
+      totalFrames,
+      didFly: Boolean(move.didFly),
+      didJump: Boolean(move.didJump),
+      crowned: Boolean(move.crowned),
       capturedPlanes,
     };
 
@@ -1025,7 +1209,7 @@ export class AeroplaneSimEngine {
       // Same player rolls again on a 6!
       this.turnPhase = TURN_PHASES.AWAIT_ROLL;
       this.diceValue = null;
-      this._aiThinkFrames = player.isAi ? 18 : 0;
+      this._aiThinkFrames = player.isAi ? PACE_CONSTANTS.AI_THINK_FRAMES : 0;
     } else {
       this._advanceToNextPlayerTurn();
     }
@@ -1035,6 +1219,7 @@ export class AeroplaneSimEngine {
     this.bonusRoll = false;
     this.consecutiveSixes = 0;
     this.diceValue = null;
+    this.noMovesStamp = null;
     this.legalMoves = [];
     this.legalPlaneIndices = [];
     this.currentPlayer = (this.currentPlayer + 1) % 4;
@@ -1042,7 +1227,9 @@ export class AeroplaneSimEngine {
     this.turnPhase = TURN_PHASES.AWAIT_ROLL;
     this._phaseTimerFrames = 0;
     this._singleMoveAutoTimer = 0;
-    this._aiThinkFrames = this.players[this.currentPlayer].isAi ? 18 : 0;
+    this._aiThinkFrames = this.players[this.currentPlayer].isAi
+      ? PACE_CONSTANTS.AI_THINK_FRAMES
+      : 0;
   }
 
   _checkImmediateVictoryState() {
@@ -1114,6 +1301,12 @@ export class AeroplaneSimEngine {
       };
     });
 
+    const humanPlayer = this.players[this.humanColorIndex] || this.players[0];
+    if (!this._hallProgressRecorded) {
+      this._hallProgressRecorded = true;
+      recordAeroplaneHallProgress(humanPlayer.finishRank, humanPlayer.starsAwarded);
+    }
+
     this._frameEvents.push({
       type: EVENT_TYPES.MATCH_FINISH,
       winnerColorIndex,
@@ -1132,8 +1325,19 @@ export class AeroplaneSimEngine {
     this.tick += 1;
     this.elapsedSec += dt;
 
+    let stepScale = 1.0;
+    if (this.slowMoRemainingSec > 0) {
+      this.slowMoRemainingSec = Math.max(0, Number((this.slowMoRemainingSec - dt).toFixed(6)));
+      this.timeScale = this.slowMoRemainingSec > 0 ? PACE_CONSTANTS.CAPTURE_SLOWMO_SCALE : 1.0;
+      stepScale = PACE_CONSTANTS.CAPTURE_SLOWMO_SCALE;
+    } else {
+      this.timeScale = 1.0;
+    }
+
     if (this.activeAnimation) {
-      this.activeAnimation.elapsedFrames += 1;
+      this.activeAnimation.elapsedFrames = Number(
+        (this.activeAnimation.elapsedFrames + stepScale).toFixed(4)
+      );
       if (this.activeAnimation.elapsedFrames >= this.activeAnimation.totalFrames) {
         this.activeAnimation = null;
       } else {
@@ -1205,8 +1409,13 @@ export class AeroplaneSimEngine {
       takeoffRule: this.takeoffRule,
       takeoffDiceValues: this.takeoffDiceValues.slice(),
       autoAdvanceSingleMove: this.autoAdvanceSingleMove,
+      fastStart: this.fastStart,
+      guaranteedFirstTakeoff: this.guaranteedFirstTakeoff,
+      humanFirstRollGuaranteedUsed: this._humanFirstRollGuaranteedUsed,
       seed: this.seed,
       tick: this.tick,
+      timeScale: this.timeScale,
+      slowMoRemainingSec: this.slowMoRemainingSec,
       turnNumber: this.turnNumber,
       currentPlayer: this.currentPlayer,
       currentColorId: COLOR_IDS[this.currentPlayer],
@@ -1217,6 +1426,7 @@ export class AeroplaneSimEngine {
       bonusRoll: this.bonusRoll,
       tripleSixCapped: this.tripleSixCapped,
       tripleSixCount: this.tripleSixCount,
+      noMovesStamp: this.noMovesStamp ? { ...this.noMovesStamp } : null,
       legalPlaneIndices: this.legalPlaneIndices.slice(),
       legalMoves: this.legalMoves.map((m) => ({
         planeIndex: m.planeIndex,
@@ -1238,6 +1448,11 @@ export class AeroplaneSimEngine {
         resultingStackCount: m.resultingStackCount,
         destX: m.destX,
         destZ: m.destZ,
+        score: m.score ?? 0,
+        isBestHint: Boolean(m.isBestHint),
+        outcomeType: m.outcomeType || 'advance',
+        outcomeIcon: m.outcomeIcon || '✈️',
+        outcomeLabel: m.outcomeLabel || '',
       })),
       lastMoveResult: this.lastMoveResult ? { ...this.lastMoveResult } : null,
       activeAnimation: this.activeAnimation ? { ...this.activeAnimation } : null,

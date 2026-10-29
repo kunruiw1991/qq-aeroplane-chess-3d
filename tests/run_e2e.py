@@ -95,7 +95,7 @@ def t04_frozen_api_and_deep_clone_state(h: AeroplaneTestHarness) -> None:
         const desc = Object.getOwnPropertyDescriptor(window, '__AEROPLANE__');
         const nonWritable = desc && desc.writable === false && desc.configurable === false;
         const noPushCheat = !('pushForcedDice' in window.__AEROPLANE__);
-        window.__AEROPLANE__.startMatch({ seed: 101, forcedDiceQueue: [2] });
+        window.__AEROPLANE__.startMatch({ seed: 101, fastStart: false, forcedDiceQueue: [2] });
         // Passing an argument to rollDice(6) must be ignored in favor of the queue/PRNG
         const afterRoll = window.__AEROPLANE__.rollDice(6);
         const s1 = window.__AEROPLANE__.getState();
@@ -143,6 +143,7 @@ def t06_takeoff_five_six_rule_roll_5(h: AeroplaneTestHarness) -> None:
   st = h.eval_js(
       """(() => {
         window.__AEROPLANE__.startMatch({
+          fastStart: false,
           takeoffRule: 'five_six',
           forcedDiceQueue: [5],
         });
@@ -161,6 +162,7 @@ def t07_takeoff_five_six_rule_roll_6(h: AeroplaneTestHarness) -> None:
   st = h.eval_js(
       """(() => {
         window.__AEROPLANE__.startMatch({
+          fastStart: false,
           takeoffRule: 'five_six',
           forcedDiceQueue: [6],
         });
@@ -181,6 +183,7 @@ def t08_takeoff_five_six_rejects_1_to_4(h: AeroplaneTestHarness) -> None:
         const counts = [];
         for (const d of [1, 2, 3, 4]) {
           window.__AEROPLANE__.startMatch({
+            fastStart: false,
             takeoffRule: 'five_six',
             forcedDiceQueue: [d],
           });
@@ -197,6 +200,7 @@ def t09_takeoff_strict_six_rule(h: AeroplaneTestHarness) -> None:
   res = h.eval_js(
       """(() => {
         window.__AEROPLANE__.startMatch({
+          fastStart: false,
           takeoffRule: 'strict_six',
           forcedDiceQueue: [5, 6],
           humanCount: 4,
@@ -216,6 +220,7 @@ def t10_bonus_roll_on_six(h: AeroplaneTestHarness) -> None:
   res = h.eval_js(
       """(() => {
         window.__AEROPLANE__.startMatch({
+          fastStart: false,
           forcedDiceQueue: [6, 3],
           humanCount: 4,
         });
@@ -241,6 +246,7 @@ def t11_triple_six_safety_cap(h: AeroplaneTestHarness) -> None:
   res = h.eval_js(
       """(() => {
         window.__AEROPLANE__.startMatch({
+          fastStart: false,
           forcedDiceQueue: [6, 6, 6],
           humanCount: 4,
         });
@@ -815,14 +821,18 @@ def _verify_viewport_layout(
   audit = h.audit_viewport_and_hud()
   assert audit["scrollWidth"] <= width, f"Horizontal scroll overflow on {width}x{height}: {audit}"
   assert audit["scrollHeight"] <= height, f"Vertical scroll overflow on {width}x{height}: {audit}"
-  assert 1 <= audit["controlCount"] <= 6, (
-      f"Expected <= 6 visible HUD controls on {width}x{height}, got {audit['controlCount']}: {audit['controls']}"
+  assert 1 <= audit["controlCount"] <= 5, (
+      f"Expected <= 5 visible HUD controls on {width}x{height}, got {audit['controlCount']}: {audit['controls']}"
   )
   assert audit["overlaps"] == [], f"Overlapping HUD controls on {width}x{height}: {audit['overlaps']}"
   for ctrl in audit["controls"]:
-    assert ctrl["width"] >= 64 and ctrl["height"] >= 64, (
-        f"Touch target < 64x64px on {width}x{height}: {ctrl}"
+    assert ctrl["width"] >= 68 and ctrl["height"] >= 68, (
+        f"Touch target < 68x68px on {width}x{height}: {ctrl}"
     )
+    if ctrl["testid"] == "hud-btn-roll":
+      assert ctrl["height"] >= 96, (
+          f"Roll button height < 96px on {width}x{height}: {ctrl}"
+      )
 
 
 def t33_viewport_1280x800_hud_and_zero_scroll_audit(
@@ -885,9 +895,547 @@ def t36_viewport_390x844_mobile_portrait_and_gbrowser_cli_audit(
   assert jpg_dest.exists() and jpg_dest.stat().st_size > 15000
 
   # Also run official gbrowser CLI check if available
-  gb_res = h.run_gbrowser_cli(["js", "Boolean(window.__AEROPLANE__)"])
-  if gb_res.returncode == 0 and "Unknown command" not in gb_res.stdout:
-    assert "true" in gb_res.stdout.lower(), gb_res.stdout
+  try:
+    gb_res = h.run_gbrowser_cli(["js", "Boolean(window.__AEROPLANE__)"])
+    if gb_res.returncode == 0 and "Unknown command" not in gb_res.stdout:
+      assert "true" in gb_res.stdout.lower(), gb_res.stdout
+  except FileNotFoundError:
+    pass
+
+
+def t37_fast_start_launchpad_planes_and_guaranteed_first_takeoff_die(
+    h: AeroplaneTestHarness,
+) -> None:
+  res = h.eval_js(
+      """(() => {
+        // Default fastStart: true -> each player has 1 plane on launchpad (relStep=0)
+        // and human's first roll across 8 seeds is guaranteed to be a takeoff die (5 or 6).
+        const firstRolls = [];
+        for (let seed = 20261029; seed <= 20261036; seed++) {
+          const s0 = window.__AEROPLANE__.startMatch({ seed });
+          const launchpadCount = s0.sim.players.filter((p) => p.planes[0].state === 'launchpad' && p.planes[0].relStep === 0).length;
+          const sRoll = window.__AEROPLANE__.rollDice();
+          firstRolls.push({
+            seed,
+            fastStart: s0.sim.fastStart,
+            guaranteedFirstTakeoff: s0.sim.guaranteedFirstTakeoff,
+            launchpadCount,
+            roll: sRoll.sim.diceValue,
+            legalCount: sRoll.sim.legalMoves.length,
+          });
+        }
+        // Also verify fastStart: false disables launchpad pre-placement
+        const sLegacy = window.__AEROPLANE__.startMatch({
+          seed: 20261029,
+          fastStart: false,
+          guaranteedFirstTakeoff: false,
+        });
+        const legacyHangarCount = sLegacy.sim.planes.filter((p) => p.state === 'hangar' && p.relStep === -1).length;
+        return { firstRolls, legacyHangarCount };
+      })()"""
+  )
+  assert res["legacyHangarCount"] == 16, res
+  for entry in res["firstRolls"]:
+    assert entry["fastStart"] is True and entry["guaranteedFirstTakeoff"] is True, entry
+    assert entry["launchpadCount"] == 4, entry
+    assert entry["roll"] in (5, 6), f"Expected guaranteed first takeoff die (5 or 6), got {entry}"
+    assert entry["legalCount"] == 4, f"Expected all 4 planes legal on first roll (1 launchpad + 3 hangar), got {entry}"
+
+
+def t38_pace_frame_budgets_and_no_moves_stamp(
+    h: AeroplaneTestHarness,
+) -> None:
+  res = h.eval_js(
+      """(() => {
+        // 1. Human NO_MOVES stamp & 20-frame budget
+        window.__AEROPLANE__.startMatch({
+          fastStart: false,
+          guaranteedFirstTakeoff: false,
+          forcedDiceQueue: [2, 3],
+        });
+        window.__AEROPLANE__.rollDice();
+        const stampEl = document.querySelector('[data-testid="hud-no-moves-stamp"]');
+        const humanStampVisible = Boolean(stampEl && !stampEl.hidden);
+        const humanStampClass = stampEl ? stampEl.className : '';
+        const humanStampText = stampEl ? stampEl.textContent.trim() : '';
+        // Step 19 frames -> still in NO_MOVES
+        const s19 = window.__AEROPLANE__.stepFrames(19);
+        const phaseAt19 = s19.sim.turnPhase;
+        // Step 1 more frame (total 20f) -> transitions to AI player 1!
+        const s20 = window.__AEROPLANE__.stepFrames(1);
+        const playerAt20 = s20.sim.currentPlayer;
+
+        // 2. AI think (6f) + roll 3 -> AI NO_MOVES tiny stamp
+        const sAiRoll = window.__AEROPLANE__.stepFrames(6);
+        const aiStampVisible = Boolean(stampEl && !stampEl.hidden);
+        const aiStampClass = stampEl ? stampEl.className : '';
+
+        // 3. Single-move auto-advance shows ghost preview for 0.5 s (30f) before moving
+        window.__AEROPLANE__.startMatch({
+          customPlaneStates: { red: [4, -1, -1, -1] },
+          forcedDiceQueue: [3],
+        });
+        window.__AEROPLANE__.rollDice();
+        const sGhost15 = window.__AEROPLANE__.stepFrames(15);
+        const ghostDuringSingleMove = sGhost15.render.ghostPreviewCount;
+        const phaseAt15 = sGhost15.sim.turnPhase;
+        const relStepAt15 = sGhost15.sim.players[0].planes[0].relStep;
+        const sAfter30 = window.__AEROPLANE__.stepFrames(16);
+        const relStepAfter30 = sAfter30.sim.players[0].planes[0].relStep;
+        const animActiveAfter30 = Boolean(sAfter30.sim.activeAnimation);
+
+        // 4. Long fly move (18 -> 30 -> 34) capped at <= 54 frames
+        window.__AEROPLANE__.startMatch({
+          customPlaneStates: { red: [15, 2, -1, -1] },
+          forcedDiceQueue: [3],
+        });
+        window.__AEROPLANE__.rollDice();
+        const sFly = window.__AEROPLANE__.selectPlane(0);
+        const flyTotalFrames = sFly.sim.activeAnimation ? sFly.sim.activeAnimation.totalFrames : 999;
+
+        return {
+          humanStampVisible,
+          humanStampClass,
+          humanStampText,
+          phaseAt19,
+          playerAt20,
+          sAiPhase: sAiRoll.sim.turnPhase,
+          aiStampVisible,
+          aiStampClass,
+          ghostDuringSingleMove,
+          phaseAt15,
+          relStepAt15,
+          relStepAfter30,
+          animActiveAfter30,
+          flyTotalFrames,
+        };
+      })()"""
+  )
+  assert res["humanStampVisible"] is True, res
+  assert "big-human" in res["humanStampClass"], res
+  assert "没掷到5/6，起飞失败" in res["humanStampText"], res
+  assert res["phaseAt19"] == "no_moves" and res["playerAt20"] == 1, res
+  assert res["sAiPhase"] == "no_moves" and res["aiStampVisible"] is True, res
+  assert "tiny-ai" in res["aiStampClass"], res
+  assert res["phaseAt15"] == "await_move" and res["ghostDuringSingleMove"] == 1 and res["relStepAt15"] == 4, res
+  assert res["relStepAfter30"] == 7 and res["animActiveAfter30"] is True, res
+  assert res["flyTotalFrames"] <= 54, f"Expected move frames capped at <=54, got {res}"
+
+
+def t39_ghost_previews_outcome_icons_and_best_move_hint(
+    h: AeroplaneTestHarness,
+) -> None:
+  h.set_viewport(1280, 800, mobile=False, touch=False)
+  res = h.eval_js(
+      """(() => {
+        // Set up Red with 3 distinct legal outcomes on roll 3:
+        // Plane 0 at relStep=2 -> lands on relStep=5 (trackIndex=4) where Yellow plane 0 sits -> 💥 capture!
+        // Plane 1 at relStep=15 -> lands on relStep=18 -> ✈️ fly!
+        // Plane 2 at relStep=52 -> lands on relStep=55 -> advance
+        window.__AEROPLANE__.startMatch({
+          customPlaneStates: [
+            { colorIndex: 0, planeIndex: 0, relStep: 2 },
+            { colorIndex: 0, planeIndex: 1, relStep: 15 },
+            { colorIndex: 0, planeIndex: 2, relStep: 52 },
+            { colorIndex: 1, planeIndex: 0, trackIndex: 4 },
+          ],
+          forcedDiceQueue: [3],
+        });
+        const st = window.__AEROPLANE__.rollDice();
+        const badges = Array.from(document.querySelectorAll('#hud-ghost-layer .ghost-outcome-badge')).map((el) => ({
+          planeIndex: Number(el.getAttribute('data-plane-index')),
+          outcomeType: el.getAttribute('data-outcome-type'),
+          isBestHint: el.classList.contains('is-best-hint'),
+          text: el.textContent.trim(),
+        }));
+        return {
+          ghostPreviews: st.render.ghostPreviews,
+          highlightedPlanes: st.render.highlightedPlanes,
+          badges,
+        };
+      })()"""
+  )
+  assert len(res["ghostPreviews"]) == 3, res
+  assert len(res["badges"]) == 3, res
+  outcomes = {b["planeIndex"]: b for b in res["badges"]}
+  assert outcomes[0]["outcomeType"] == "capture" and "💥" in outcomes[0]["text"], outcomes
+  assert outcomes[1]["outcomeType"] == "fly" and "✈️" in outcomes[1]["text"], outcomes
+  best_badges = [b for b in res["badges"] if b["isBestHint"]]
+  assert len(best_badges) == 1, res
+
+  # Raycast click on Ghost Preview #0 destination on the 3D canvas!
+  ghost0 = next(g for g in res["ghostPreviews"] if g["planeIndex"] == 0)
+  h.click_at(ghost0["clientX"], ghost0["clientY"])
+  st_after = h.get_state()
+  assert st_after["sim"]["players"][0]["planes"][0]["relStep"] == 5, st_after["sim"]
+  assert st_after["sim"]["players"][1]["planes"][0]["state"] == "hangar", st_after["sim"]
+
+
+def t40_capture_slowmo_camera_punch_floating_text_and_smoke(
+    h: AeroplaneTestHarness,
+) -> None:
+  res = h.eval_js(
+      """(() => {
+        window.__AEROPLANE__.startMatch({
+          customPlaneStates: [
+            { colorIndex: 0, planeIndex: 0, relStep: 2 },
+            { colorIndex: 0, planeIndex: 1, relStep: 8 },
+            { colorIndex: 1, planeIndex: 0, trackIndex: 4 },
+          ],
+          forcedDiceQueue: [3],
+        });
+        window.__AEROPLANE__.rollDice();
+        window.__AEROPLANE__.selectPlane(0); // Captures Yellow on trackIndex=4!
+        const st = window.__AEROPLANE__.stepFrames(2);
+        const fxDom = Array.from(document.querySelectorAll('#hud-fx-layer .floating-fx-text')).map((el) => el.textContent.trim());
+        return {
+          timeScale: st.sim.timeScale,
+          slowMoRemainingSec: st.sim.slowMoRemainingSec,
+          cameraPunchActive: st.render.cameraPunchActive,
+          cameraZoomRatio: st.render.cameraZoomRatio,
+          activeSmokePuffCount: st.render.activeSmokePuffCount,
+          activeFloatingTexts: st.render.activeFloatingTexts,
+          fxDom,
+          captureSfxCount: st.audio.captureSfxCount,
+        };
+      })()"""
+  )
+  assert res["timeScale"] == 0.3 and res["slowMoRemainingSec"] > 0, res
+  assert res["cameraPunchActive"] is True and res["cameraZoomRatio"] == 0.85, res
+  assert res["activeSmokePuffCount"] > 0, res
+  assert any("击落!" in t["text"] for t in res["activeFloatingTexts"]), res
+  assert any("击落!" in txt for txt in res["fxDom"]), res
+  assert res["captureSfxCount"] >= 1, res
+
+
+def t41_fly_camera_follow_speed_lines_and_crown_fanfare(
+    h: AeroplaneTestHarness,
+) -> None:
+  res = h.eval_js(
+      """(() => {
+        // 1. Fly (18 -> 30) camera follow + speed lines + whoosh SFX
+        window.__AEROPLANE__.startMatch({
+          customPlaneStates: { red: [15, 2, -1, -1] },
+          forcedDiceQueue: [3],
+        });
+        window.__AEROPLANE__.rollDice();
+        window.__AEROPLANE__.selectPlane(0);
+        const stFly = window.__AEROPLANE__.stepFrames(8);
+
+        // 2. Crown (52 + 4 = 56) fireworks + 3-note fanfare + "到家!" floating text
+        window.__AEROPLANE__.startMatch({
+          planesToWin: 4,
+          customPlaneStates: { red: [52, 2, -1, -1] },
+          forcedDiceQueue: [4],
+        });
+        window.__AEROPLANE__.rollDice();
+        window.__AEROPLANE__.selectPlane(0);
+        const stCrown = window.__AEROPLANE__.stepFrames(2);
+        const fxDom = Array.from(document.querySelectorAll('#hud-fx-layer .floating-fx-text')).map((el) => el.textContent.trim());
+
+        return {
+          cameraFollowActive: stFly.render.cameraFollowActive,
+          flySpeedLinesActive: stFly.render.flySpeedLinesActive,
+          flyWhooshCount: stFly.audio.flyWhooshCount,
+          activeFireworkCount: stCrown.render.activeFireworkCount,
+          crownTexts: stCrown.render.activeFloatingTexts,
+          fxDom,
+          fanfareCount: stCrown.audio.fanfareCount,
+          dieScale: stCrown.render.dieScale,
+          diceTickCount: stCrown.audio.diceTickCount,
+        };
+      })()"""
+  )
+  assert res["cameraFollowActive"] is True and res["flySpeedLinesActive"] is True, res
+  assert res["flyWhooshCount"] >= 1, res
+  assert res["activeFireworkCount"] > 0, res
+  assert any("到家!" in t["text"] for t in res["crownTexts"]), res
+  assert any("到家!" in txt for txt in res["fxDom"]), res
+  assert res["fanfareCount"] >= 1, res
+  assert res["dieScale"] >= 1.6 and res["diceTickCount"] >= 1, res
+
+
+def t42_kid_hud_your_turn_banner_avatars_and_max_5_controls(
+    h: AeroplaneTestHarness,
+) -> None:
+  h.set_viewport(1280, 800, mobile=False, touch=False)
+  res = h.eval_js(
+      """(() => {
+        window.__AEROPLANE__.startMatch({
+          customPlaneStates: { red: [0, 3, 7, 11] },
+          forcedDiceQueue: [6],
+        });
+        const banner = document.querySelector('[data-testid="hud-your-turn-banner"]');
+        const rollBtn = document.querySelector('[data-testid="hud-btn-roll"]');
+        const rollRect = rollBtn.getBoundingClientRect();
+        const chips = Array.from(document.querySelectorAll('#hud-roster-strip .roster-chip'));
+        const activeChip = document.querySelector('#hud-roster-strip .roster-chip.active-turn');
+        const activeProp = activeChip ? activeChip.querySelector('.avatar-propeller.spinning') : null;
+        const chipFontSize = activeChip ? parseFloat(window.getComputedStyle(activeChip).fontSize) : 0;
+        const activeTransform = activeChip ? window.getComputedStyle(activeChip).transform : '';
+
+        // Roll 6 with all 4 planes legal -> verify <= 5 visible controls!
+        const stAfterRoll = window.__AEROPLANE__.rollDice();
+        return {
+          bannerVisible: Boolean(banner && !banner.hidden),
+          bannerText: banner ? banner.textContent.trim() : '',
+          rollWidth: rollRect.width,
+          rollHeight: rollRect.height,
+          rollPulsing: rollBtn.classList.contains('pulsing-roll'),
+          chipCount: chips.length,
+          chipFontSize,
+          hasSpinningPropeller: Boolean(activeProp),
+          activeTransform,
+          hudClickableCount: stAfterRoll.hudClickableCount,
+          legalMoveCount: stAfterRoll.sim.legalMoves.length,
+        };
+      })()"""
+  )
+  assert res["bannerVisible"] is True and "轮到你了" in res["bannerText"], res
+  assert res["rollHeight"] >= 96 and res["rollPulsing"] is True, res
+  assert res["chipCount"] == 4 and res["chipFontSize"] >= 16, res
+  assert res["hasSpinningPropeller"] is True, res
+  assert res["legalMoveCount"] == 4 and res["hudClickableCount"] <= 5, res
+
+
+def t43_hall_progress_local_storage_merge_write(
+    h: AeroplaneTestHarness,
+) -> None:
+  res = h.eval_js(
+      """(() => {
+        window.localStorage.setItem(
+          'qq_hall_progress',
+          JSON.stringify({ checkers: { plays: 4, best: 3, stars: 3, last: '2026-10-01T00:00:00.000Z' } })
+        );
+        window.__AEROPLANE__.startMatch({
+          modeId: 'quick_2',
+          customPlaneStates: {
+            red: [56, 52, -1, -1],
+          },
+          forcedDiceQueue: [4],
+        });
+        window.__AEROPLANE__.rollDice();
+        window.__AEROPLANE__.selectPlane(1);
+        const raw = window.localStorage.getItem('qq_hall_progress');
+        return raw ? JSON.parse(raw) : null;
+      })()"""
+  )
+  assert res is not None and "checkers" in res and "aeroplane" in res, res
+  assert res["checkers"]["plays"] == 4, res
+  aero = res["aeroplane"]
+  assert aero["plays"] >= 1 and aero["stars"] == 3 and aero["best"] >= 1, aero
+  assert isinstance(aero["last"], str) and "T" in aero["last"], aero
+
+
+def t44_director_v2_dedupe_moves_camera_ease_back_and_help_me_move_label(
+    h: AeroplaneTestHarness,
+) -> None:
+  res = h.eval_js(
+      """(() => {
+        // 1. Dedupe equivalent hangar takeoff moves:
+        //    Plane 0 on launchpad (relStep=0), Planes 1, 2, 3 in hangar (relStep=-1), roll 5 ->
+        //    must show 2 distinct buttons (Plane 0 advance + Plane 1 "🛫 起飞", lowest hangar index),
+        //    and NEVER two identical "起飞" buttons!
+        window.__AEROPLANE__.startMatch({
+          customPlaneStates: { red: [0, -1, -1, -1] },
+          forcedDiceQueue: [5],
+        });
+        window.__AEROPLANE__.rollDice();
+        const getVisiblePlaneButtons = () =>
+          Array.from(document.querySelectorAll('.hud-plane-btn'))
+            .filter((b) => !b.hidden)
+            .map((b) => ({
+              testid: b.getAttribute('data-testid'),
+              text: b.textContent.replace(/\\s+/g, ' ').trim(),
+            }));
+        const fastStartButtons = getVisiblePlaneButtons();
+
+        // Also check when ONLY 2 hangar planes are legal (planes 0, 1 already at goal, planes 2, 3 in hangar):
+        // must show ONE button ("🛫 起飞" on lowest index plane 2), NOT two identical buttons!
+        window.__AEROPLANE__.startMatch({
+          planesToWin: 4,
+          customPlaneStates: { red: [56, 56, -1, -1] },
+          forcedDiceQueue: [6],
+        });
+        window.__AEROPLANE__.rollDice();
+        const twoHangarButtons = getVisiblePlaneButtons();
+
+        // 2. Big button label during await_move must read "✨ 帮我走"
+        const rollBtn = document.querySelector('[data-testid="hud-btn-roll"]');
+        const rollBtnTextAwaitMove = rollBtn ? rollBtn.textContent.replace(/\\s+/g, ' ').trim() : '';
+
+        // 3. Camera punch-in on capture must ease back to cameraZoomRatio == 1.0 (±0.02)
+        //    within <= 1.0s and BEFORE the next human AWAIT_ROLL starts!
+        window.__AEROPLANE__.startMatch({
+          customPlaneStates: [
+            { colorIndex: 0, planeIndex: 0, relStep: 2 },
+            { colorIndex: 0, planeIndex: 1, relStep: 8 },
+            { colorIndex: 1, planeIndex: 0, trackIndex: 7 },
+          ],
+          forcedDiceQueue: [6], // Red rolls 6 -> 2 + 6 = 8 (trackIndex=7) -> captures Yellow & gets bonus AWAIT_ROLL!
+        });
+        window.__AEROPLANE__.rollDice();
+        window.__AEROPLANE__.selectPlane(0);
+        const stMidCapture = window.__AEROPLANE__.stepFrames(4);
+        const zoomDuringCapture = stMidCapture.render.cameraZoomRatio;
+
+        // Advance until activeAnimation finishes (when human's bonus AWAIT_ROLL is ready)
+        let stReady = stMidCapture;
+        let framesElapsed = 4;
+        while (stReady.sim.activeAnimation && framesElapsed < 120) {
+          stReady = window.__AEROPLANE__.stepFrames(1);
+          framesElapsed += 1;
+        }
+        const zoomAtHumanAwaitRoll = stReady.render.cameraZoomRatio;
+        const bannerVisibleAtReady = !document.querySelector('[data-testid="hud-your-turn-banner"]').hidden;
+
+        return {
+          fastStartButtons,
+          twoHangarButtons,
+          rollBtnTextAwaitMove,
+          zoomDuringCapture,
+          zoomAtHumanAwaitRoll,
+          framesElapsed,
+          bannerVisibleAtReady,
+        };
+      })()"""
+  )
+  # Check (1) deduped buttons
+  assert len(res["fastStartButtons"]) == 2, res
+  takeoff_btns = [b for b in res["fastStartButtons"] if "🛫 起飞" in b["text"]]
+  assert len(takeoff_btns) == 1 and takeoff_btns[0]["testid"] == "hud-btn-plane-1", res
+
+  assert len(res["twoHangarButtons"]) == 1, res
+  assert res["twoHangarButtons"][0]["testid"] == "hud-btn-plane-2", res
+  assert "🛫 起飞" in res["twoHangarButtons"][0]["text"], res
+
+  # Check (3) "✨ 帮我走" label
+  assert res["rollBtnTextAwaitMove"] == "✨ 帮我走", res
+
+  # Check (2) camera punch-in eases back to 1.0 (±0.02) before human await_roll
+  assert res["zoomDuringCapture"] == 0.85, res
+  assert abs(res["zoomAtHumanAwaitRoll"] - 1.0) <= 0.02, res
+  assert res["bannerVisibleAtReady"] is True, res
+
+
+def t45_director_v3_single_row_status_pills_short_banner_and_staggered_badges(
+    h: AeroplaneTestHarness,
+) -> None:
+  for width, height in [(1280, 800), (1024, 768)]:
+    h.set_viewport(width, height, mobile=(width == 1024), touch=(width == 1024))
+    res = h.eval_js(
+        """(() => {
+          window.__AEROPLANE__.startMatch({
+            customPlaneStates: {
+              red: [18, 6, 56, 0],
+              yellow: [10, 22, 0, -1],
+              blue: [53, 14, 14, -1],
+              green: [30, 52, 0, -1],
+            },
+            forcedDiceQueue: [6],
+          });
+          window.__AEROPLANE__.rollDice();
+          window.__AEROPLANE__.stepFrames(14);
+
+          const chips = Array.from(document.querySelectorAll('#hud-roster-strip .roster-chip')).map((el) => {
+            const r = el.getBoundingClientRect();
+            return {
+              colorId: el.getAttribute('data-color-id'),
+              left: Math.round(r.left * 10) / 10,
+              top: Math.round(r.top * 10) / 10,
+              centerY: Math.round((r.top + r.height / 2) * 10) / 10,
+            };
+          });
+
+          const bannerEl = document.querySelector('.message-banner');
+          const coachTextEl = document.querySelector('#hud-coach-text');
+          const bannerFullText = bannerEl ? bannerEl.textContent.replace(/\\s+/g, ' ').trim() : '';
+          const coachCopy = coachTextEl ? coachTextEl.textContent.trim() : '';
+          const bannerMaxWidth = bannerEl ? window.getComputedStyle(bannerEl).maxWidth : '';
+
+          const badges = Array.from(document.querySelectorAll('#hud-ghost-layer .ghost-outcome-badge')).map((el) => {
+            const r = el.getBoundingClientRect();
+            return {
+              planeIndex: Number(el.getAttribute('data-plane-index')),
+              text: el.textContent.replace(/\\s+/g, ' ').trim(),
+              left: r.left,
+              right: r.right,
+              top: r.top,
+              bottom: r.bottom,
+            };
+          });
+
+          const badgeOverlaps = [];
+          for (let i = 0; i < badges.length; i += 1) {
+            for (let j = i + 1; j < badges.length; j += 1) {
+              const a = badges[i];
+              const b = badges[j];
+              const ix = Math.max(0, Math.min(a.right, b.right) - Math.max(a.left, b.left));
+              const iy = Math.max(0, Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top));
+              if (ix > 1 && iy > 1) {
+                badgeOverlaps.push({ a: a.text, b: b.text, ix, iy });
+              }
+            }
+          }
+
+          const yourTurnBanner = document.querySelector('[data-testid="hud-your-turn-banner"]');
+          return {
+            chips,
+            bannerFullText,
+            coachCopy,
+            bannerFullLen: Array.from(bannerFullText).length,
+            coachCopyLen: Array.from(coachCopy).length,
+            bannerMaxWidth,
+            badges,
+            badgeOverlaps,
+            yourTurnVisible: Boolean(yourTurnBanner && !yourTurnBanner.hidden),
+          };
+        })()"""
+    )
+    assert len(res["chips"]) == 4, res
+    center_ys = [c["centerY"] for c in res["chips"]]
+    assert max(center_ys) - min(center_ys) <= 2.0, (
+        f"Expected all 4 status pills on one row at {width}x{height}, got {res['chips']}"
+    )
+    lefts = [c["left"] for c in res["chips"]]
+    assert lefts == sorted(lefts), f"Expected strictly increasing left positions on one row, got {res['chips']}"
+    assert res["bannerFullLen"] <= 14 and res["coachCopyLen"] <= 14, (
+        f"Expected message banner copy <= 14 chars, got {res}"
+    )
+    assert res["badgeOverlaps"] == [], f"Expected zero overlapping floating badges at {width}x{height}, got {res}"
+    assert res["yourTurnVisible"] is True, res
+
+  # Recapture screenshot.jpg at 1280x800 mid-game with the 轮到你了 banner, single-row pills, and staggered badges
+  h.set_viewport(1280, 800, mobile=False, touch=False)
+  h.eval_js(
+      """(() => {
+        window.__AEROPLANE__.startMatch({
+          customPlaneStates: {
+            red: [18, 6, 56, 0],
+            yellow: [10, 22, 0, -1],
+            blue: [53, 14, 14, -1],
+            green: [30, 52, 0, -1],
+          },
+          forcedDiceQueue: [6],
+        });
+        window.__AEROPLANE__.rollDice();
+        window.__AEROPLANE__.stepFrames(14);
+      })()"""
+  )
+  png_shot = h.capture_screenshot(h.shots_dir / "gameplay_1280x800.png")
+  jpg_dest = h.root_dir / "screenshot.jpg"
+  subprocess.run(
+      [
+          MAGICK_BIN,
+          str(png_shot),
+          "-quality",
+          "88",
+          str(jpg_dest),
+      ],
+      cwd="/tmp",
+      check=True,
+      timeout=15,
+  )
 
 
 ALL_TESTS: list[tuple[str, Callable[[AeroplaneTestHarness], None]]] = [
@@ -927,6 +1475,15 @@ ALL_TESTS: list[tuple[str, Callable[[AeroplaneTestHarness], None]]] = [
     ("T34_viewport_1024x768_ipad_landscape_audit", t34_viewport_1024x768_ipad_landscape_audit),
     ("T35_viewport_844x390_mobile_landscape_audit", t35_viewport_844x390_mobile_landscape_audit),
     ("T36_viewport_390x844_mobile_portrait_and_gbrowser_cli_audit", t36_viewport_390x844_mobile_portrait_and_gbrowser_cli_audit),
+    ("T37_fast_start_launchpad_planes_and_guaranteed_first_takeoff_die", t37_fast_start_launchpad_planes_and_guaranteed_first_takeoff_die),
+    ("T38_pace_frame_budgets_and_no_moves_stamp", t38_pace_frame_budgets_and_no_moves_stamp),
+    ("T39_ghost_previews_outcome_icons_and_best_move_hint", t39_ghost_previews_outcome_icons_and_best_move_hint),
+    ("T40_capture_slowmo_camera_punch_floating_text_and_smoke", t40_capture_slowmo_camera_punch_floating_text_and_smoke),
+    ("T41_fly_camera_follow_speed_lines_and_crown_fanfare", t41_fly_camera_follow_speed_lines_and_crown_fanfare),
+    ("T42_kid_hud_your_turn_banner_avatars_and_max_5_controls", t42_kid_hud_your_turn_banner_avatars_and_max_5_controls),
+    ("T43_hall_progress_local_storage_merge_write", t43_hall_progress_local_storage_merge_write),
+    ("T44_director_v2_dedupe_moves_camera_ease_back_and_help_me_move_label", t44_director_v2_dedupe_moves_camera_ease_back_and_help_me_move_label),
+    ("T45_director_v3_single_row_status_pills_short_banner_and_staggered_badges", t45_director_v3_single_row_status_pills_short_banner_and_staggered_badges),
 ]
 
 

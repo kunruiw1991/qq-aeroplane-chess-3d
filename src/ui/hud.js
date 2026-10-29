@@ -83,10 +83,10 @@ export class HudScreens {
       <!-- 3. PLAYING HUD SCREEN -->
       <section class="ui-screen screen-playing" data-screen="${SCREEN_IDS.PLAYING}" hidden>
         <div class="hud-top-bar">
-          <div class="hud-roster-strip" id="hud-roster-strip"></div>
-          <div class="hud-coach-pill" id="hud-coach-pill">
+          <div class="hud-roster-strip" id="hud-roster-strip" data-testid="hud-roster-strip"></div>
+          <div class="hud-coach-pill message-banner" id="hud-coach-pill" data-testid="message-banner">
             <span class="coach-die" id="hud-coach-die">🎲</span>
-            <span class="coach-text" id="hud-coach-text">点击下方大骰子起飞！</span>
+            <span class="coach-text" id="hud-coach-text">轮到 红鹰号</span>
           </div>
           <div class="hud-top-actions">
             <button type="button" class="sky-btn hud-icon-btn" data-testid="${TEST_IDS.HUD_BTN_AUDIO}" aria-label="切换音效">
@@ -98,27 +98,44 @@ export class HudScreens {
           </div>
         </div>
 
-        <div class="hud-bottom-dock">
-          <button type="button" class="sky-btn hud-plane-btn" data-testid="${TEST_IDS.HUD_BTN_PLANE_0}" hidden>
-            <span class="plane-btn-num">✈️ 1号机</span>
-            <span class="plane-btn-tag" id="plane-tag-0">起飞</span>
-          </button>
-          <button type="button" class="sky-btn hud-plane-btn" data-testid="${TEST_IDS.HUD_BTN_PLANE_1}" hidden>
-            <span class="plane-btn-num">✈️ 2号机</span>
-            <span class="plane-btn-tag" id="plane-tag-1">前进</span>
-          </button>
-          <button type="button" class="sky-btn hud-plane-btn" data-testid="${TEST_IDS.HUD_BTN_PLANE_2}" hidden>
-            <span class="plane-btn-num">✈️ 3号机</span>
-            <span class="plane-btn-tag" id="plane-tag-2">前进</span>
-          </button>
-          <button type="button" class="sky-btn hud-plane-btn" data-testid="${TEST_IDS.HUD_BTN_PLANE_3}" hidden>
-            <span class="plane-btn-num">✈️ 4号机</span>
-            <span class="plane-btn-tag" id="plane-tag-3">前进</span>
-          </button>
-          <button type="button" class="sky-btn hud-roll-btn" data-testid="${TEST_IDS.HUD_BTN_ROLL}">
-            <span class="roll-die-icon" id="hud-roll-die-face">🎲</span>
-            <span class="roll-btn-label" id="hud-roll-label">掷骰子</span>
-          </button>
+        <!-- 3D Projected Ghost Destination Previews & Spectacle Floating Texts (non-interactive) -->
+        <div class="hud-ghost-layer" id="hud-ghost-layer" data-testid="hud-ghost-layer"></div>
+        <div class="hud-fx-layer" id="hud-fx-layer" data-testid="hud-fx-layer"></div>
+
+        <!-- NO_MOVES Stamp (Big for Human, Tiny for AI) -->
+        <div class="no-moves-stamp" id="hud-no-moves-stamp" data-testid="hud-no-moves-stamp" hidden>
+          <span class="stamp-icon">🎲</span>
+          <span class="stamp-text" id="hud-no-moves-text">没掷到5/6，起飞失败</span>
+        </div>
+
+        <div class="hud-bottom-area">
+          <div class="your-turn-banner slide-in" id="hud-your-turn-banner" data-testid="hud-your-turn-banner">
+            <span class="banner-sparkle">🌟</span>
+            <span class="banner-title" id="hud-your-turn-text">轮到你了!</span>
+          </div>
+
+          <div class="hud-bottom-dock">
+            <button type="button" class="sky-btn hud-plane-btn" data-testid="${TEST_IDS.HUD_BTN_PLANE_0}" hidden>
+              <span class="plane-btn-num">✈️ 1号机</span>
+              <span class="plane-btn-tag" id="plane-tag-0">起飞</span>
+            </button>
+            <button type="button" class="sky-btn hud-plane-btn" data-testid="${TEST_IDS.HUD_BTN_PLANE_1}" hidden>
+              <span class="plane-btn-num">✈️ 2号机</span>
+              <span class="plane-btn-tag" id="plane-tag-1">前进</span>
+            </button>
+            <button type="button" class="sky-btn hud-plane-btn" data-testid="${TEST_IDS.HUD_BTN_PLANE_2}" hidden>
+              <span class="plane-btn-num">✈️ 3号机</span>
+              <span class="plane-btn-tag" id="plane-tag-2">前进</span>
+            </button>
+            <button type="button" class="sky-btn hud-plane-btn" data-testid="${TEST_IDS.HUD_BTN_PLANE_3}" hidden>
+              <span class="plane-btn-num">✈️ 4号机</span>
+              <span class="plane-btn-tag" id="plane-tag-3">前进</span>
+            </button>
+            <button type="button" class="sky-btn hud-roll-btn pulsing-roll" data-testid="${TEST_IDS.HUD_BTN_ROLL}">
+              <span class="roll-die-icon" id="hud-roll-die-face">🎲</span>
+              <span class="roll-btn-label" id="hud-roll-label">掷骰子</span>
+            </button>
+          </div>
         </div>
       </section>
 
@@ -234,19 +251,22 @@ export class HudScreens {
     }
   }
 
-  updateHud(simSnap, muted = false) {
+  updateHud(simSnap, muted = false, renderDiag = null) {
     this.syncAudioMuted(muted);
     if (!simSnap) return;
 
-    // 1. Update 4-player progress strip
+    // 1. Update 4-player turn-order avatars (active player scaled x1.3 with spinning propeller)
     const rosterEl = this.rootEl.querySelector('#hud-roster-strip');
     if (rosterEl && Array.isArray(simSnap.players)) {
       rosterEl.innerHTML = simSnap.players
         .map((p) => {
           const isTurn = p.colorIndex === simSnap.currentPlayer;
           return `
-            <div class="roster-chip ${isTurn ? 'active-turn' : ''}" style="--chip-color:${p.hex}">
-              <span class="chip-dot"></span>
+            <div class="roster-chip ${isTurn ? 'active-turn' : ''}" data-color-id="${p.colorId}" style="--chip-color:${p.hex}">
+              <span class="avatar-plane-wrap">
+                <span class="avatar-plane-icon">✈️</span>
+                <span class="avatar-propeller ${isTurn ? 'spinning' : ''}">✦</span>
+              </span>
               <span class="chip-name">${p.shortZh}</span>
               <span class="chip-crown">👑${p.crownedCount}/${simSnap.planesToWin}</span>
             </div>
@@ -255,44 +275,199 @@ export class HudScreens {
         .join('');
     }
 
-    // 2. Update Coach Banner
+    // 2. Update Coach Banner & Dice Result Pop (keep total banner copy <= 14 chars)
     const activePlayer = simSnap.players?.[simSnap.currentPlayer];
-    const dieFaces = ['', '⚀ 1', '⚁ 2', '⚂ 3', '⚃ 4', '⚄ 5', '⚅ 6'];
+    const dieFaces = ['', '⚀', '⚁', '⚂', '⚃', '⚄', '⚅'];
     const rolledVal = simSnap.diceValue || simSnap.lastDiceRoll;
     const dieEl = this.rootEl.querySelector('#hud-coach-die');
     const textEl = this.rootEl.querySelector('#hud-coach-text');
 
+    const rollKey = `${simSnap.turnNumber}:${simSnap.currentPlayer}:${rolledVal || 0}:${simSnap.turnPhase}`;
+    const isNewRollPop = rolledVal && rollKey !== this._lastDiceRollKey;
+    this._lastDiceRollKey = rollKey;
+
     if (dieEl) {
-      dieEl.textContent = rolledVal ? dieFaces[rolledVal] || `🎲 ${rolledVal}` : '🎲';
+      dieEl.textContent = rolledVal ? dieFaces[rolledVal] || '🎲' : '🎲';
+      if (isNewRollPop) {
+        dieEl.classList.remove('dice-stamp-pop');
+        void dieEl.offsetWidth;
+        dieEl.classList.add('dice-stamp-pop');
+      }
     }
 
     if (textEl && activePlayer) {
       if (simSnap.turnPhase === TURN_PHASES.TRIPLE_SIX) {
-        textEl.textContent = `${activePlayer.nameZh} 连续三个6！安全限制换下一位`;
+        textEl.textContent = '连掷三6 · 换人';
       } else if (simSnap.turnPhase === TURN_PHASES.NO_MOVES) {
-        textEl.textContent = `${activePlayer.nameZh} 投出 ${rolledVal} 点，无可移动飞机`;
+        textEl.textContent = `${rolledVal} 点 · 未起飞`;
       } else if (simSnap.turnPhase === TURN_PHASES.AWAIT_MOVE) {
-        const bonusNote = simSnap.bonusRoll ? ' (奖励再投!)' : '';
-        textEl.textContent = `${activePlayer.nameZh} 投出 ${rolledVal} 点！点击发光飞机出发${bonusNote}`;
-      } else if (activePlayer.isAi) {
-        textEl.textContent = `${activePlayer.nameZh} (电脑) 正在思考航线...`;
+        textEl.textContent = simSnap.bonusRoll
+          ? `${rolledVal} 点 · 奖励再投!`
+          : `${rolledVal} 点 · 选飞机`;
       } else {
-        textEl.textContent = `轮到 ${activePlayer.nameZh}：点击【掷骰子】或按空格键！`;
+        textEl.textContent = `轮到 ${activePlayer.nameZh}`;
       }
     }
 
-    // 3. Update Bottom Action Dock (strictly <= 6 visible clickable controls!)
+    // 3. Update NO_MOVES Stamp ("没掷到5/6，起飞失败": big for human, tiny for AI)
+    const stampEl = this.rootEl.querySelector('#hud-no-moves-stamp');
+    const stampTextEl = this.rootEl.querySelector('#hud-no-moves-text');
+    const stamp = simSnap.noMovesStamp;
+    if (stampEl) {
+      if (stamp && (simSnap.turnPhase === TURN_PHASES.NO_MOVES || stamp.text)) {
+        stampEl.hidden = false;
+        stampEl.className = `no-moves-stamp ${stamp.isHuman ? 'big-human' : 'tiny-ai'}`;
+        if (stampTextEl) {
+          stampTextEl.textContent = stamp.isHuman
+            ? '没掷到5/6，起飞失败'
+            : `${stamp.nameZh}: 没掷到5/6，起飞失败`;
+        }
+      } else {
+        stampEl.hidden = true;
+      }
+    }
+
+    // 4. Update Kid HUD "轮到你了!" Slide-in Banner
+    const yourTurnBanner = this.rootEl.querySelector('#hud-your-turn-banner');
+    const yourTurnText = this.rootEl.querySelector('#hud-your-turn-text');
+    const isHumanActive = Boolean(activePlayer && !activePlayer.isAi && !simSnap.activeAnimation);
+    if (yourTurnBanner) {
+      if (isHumanActive) {
+        yourTurnBanner.hidden = false;
+        yourTurnBanner.classList.add('slide-in');
+        if (yourTurnText) {
+          if (
+            simSnap.turnPhase === TURN_PHASES.AWAIT_MOVE &&
+            Array.isArray(simSnap.legalMoves) &&
+            simSnap.legalMoves.length >= 2
+          ) {
+            yourTurnText.textContent = '轮到你了! 点发光飞机出发';
+          } else {
+            yourTurnText.textContent = '轮到你了!';
+          }
+        }
+      } else {
+        yourTurnBanner.classList.remove('slide-in');
+        yourTurnBanner.hidden = true;
+      }
+    }
+
+    // 5. Update 3D Projected Ghost Destination Outcome Previews (💥 / ✈️ / 🦘 / ⭐ / ↩)
+    //    Stagger overlapping floating badges vertically so nearby destinations never collide.
+    const ghostLayer = this.rootEl.querySelector('#hud-ghost-layer');
+    if (ghostLayer) {
+      const ghosts = renderDiag?.ghostPreviews || [];
+      const vw = renderDiag?.viewportWidth || window.innerWidth || 1280;
+      const vh = renderDiag?.viewportHeight || window.innerHeight || 800;
+      const minY = vh <= 450 ? 118 : 112;
+      const maxY = vh <= 450 ? vh - 118 : vh - 148;
+      const minX = 76;
+      const maxX = vw - 76;
+      if (ghosts.length > 0 && simSnap.turnPhase === TURN_PHASES.AWAIT_MOVE) {
+        const placedBadges = [];
+        const minHorizSep = 124;
+        const minVertSep = 40;
+        const positionedGhosts = ghosts.map((g) => {
+          const safeX = Math.max(minX, Math.min(maxX, Number(g.clientX) || vw * 0.5));
+          let safeY = Math.max(minY, Math.min(maxY, Number(g.clientY) || vh * 0.5));
+          // Stagger vertically if overlapping any already placed badge
+          let attempts = 0;
+          while (
+            attempts < 8 &&
+            placedBadges.some(
+              (p) => Math.abs(safeX - p.x) < minHorizSep && Math.abs(safeY - p.y) < minVertSep
+            )
+          ) {
+            const dir = attempts % 2 === 0 ? -1 : 1;
+            const step = Math.ceil((attempts + 1) / 2) * minVertSep;
+            const candidateY = safeY + dir * step;
+            safeY = Math.max(minY, Math.min(maxY, candidateY));
+            if (
+              placedBadges.some(
+                (p) => Math.abs(safeX - p.x) < minHorizSep && Math.abs(safeY - p.y) < minVertSep
+              )
+            ) {
+              // Try opposite vertical direction if clamped against top/bottom bound
+              const altY = Math.max(minY, Math.min(maxY, safeY - dir * step * 2));
+              safeY = altY;
+            }
+            attempts += 1;
+          }
+          placedBadges.push({ x: safeX, y: safeY });
+          return { ...g, safeX, safeY };
+        });
+
+        ghostLayer.innerHTML = positionedGhosts
+          .map(
+            (g) => `
+            <div class="ghost-outcome-badge outcome-${g.outcomeType || 'advance'} ${g.isBestHint ? 'is-best-hint' : ''}"
+                 data-plane-index="${g.planeIndex}"
+                 data-outcome-type="${g.outcomeType || 'advance'}"
+                 style="left:${g.safeX.toFixed(1)}px;top:${g.safeY.toFixed(1)}px">
+              <span class="ghost-icon">${g.outcomeIcon || '✈️'}</span>
+              <span class="ghost-label">${g.outcomeLabel || ''}</span>
+            </div>
+          `
+          )
+          .join('');
+      } else {
+        ghostLayer.innerHTML = '';
+      }
+    }
+
+    // 6. Update Spectacle Floating Texts ("击落!", "到家!", "超级飞棋!") & Speed Lines
+    const fxLayer = this.rootEl.querySelector('#hud-fx-layer');
+    if (fxLayer) {
+      fxLayer.classList.toggle('speed-lines-active', Boolean(renderDiag?.flySpeedLinesActive));
+      const fxTexts = renderDiag?.activeFloatingTexts || [];
+      if (fxTexts.length > 0) {
+        fxLayer.innerHTML = fxTexts
+          .map(
+            (ft) => `
+            <div class="floating-fx-text fx-${ft.kind}"
+                 data-fx-kind="${ft.kind}"
+                 style="left:${ft.clientX}px;top:${ft.clientY}px">
+              ${ft.fullText || ft.text}
+            </div>
+          `
+          )
+          .join('');
+      } else {
+        fxLayer.innerHTML = '';
+      }
+    }
+
+    // 7. Update Bottom Action Dock (strictly <= 5 visible clickable controls during play!)
+    //    2 top buttons (audio + pause) + 1 roll button + <= 2 plane buttons = <= 5 controls!
     const isHumanMoveChoice =
       simSnap.turnPhase === TURN_PHASES.AWAIT_MOVE &&
-      activePlayer &&
-      !activePlayer.isAi &&
+      isHumanActive &&
       Array.isArray(simSnap.legalMoves) &&
       simSnap.legalMoves.length > 0;
 
-    const legalMap = new Map();
-    if (isHumanMoveChoice) {
-      for (const m of simSnap.legalMoves) {
-        legalMap.set(m.planeIndex, m);
+    // Show plane buttons ONLY when >= 2 legal moves exist, deduplicating equivalent moves
+    // (same destination & outcome, e.g. multiple hangar planes offering "🛫 起飞" -> keep lowest planeIndex),
+    // and cap at top 2 highest-scored unique moves.
+    const visibleButtonMap = new Map();
+    if (isHumanMoveChoice && simSnap.legalMoves.length >= 2) {
+      const byIndex = simSnap.legalMoves
+        .slice()
+        .sort((a, b) => a.planeIndex - b.planeIndex);
+      const uniqueMoves = [];
+      const seenEquiv = new Set();
+      for (const m of byIndex) {
+        const key = `${m.toState}:${m.toRelStep}:${m.outcomeType || ''}:${m.outcomeLabel || ''}`;
+        if (!seenEquiv.has(key)) {
+          seenEquiv.add(key);
+          uniqueMoves.push(m);
+        }
+      }
+      const sortedUnique = uniqueMoves.sort(
+        (a, b) => (b.score ?? 0) - (a.score ?? 0) || a.planeIndex - b.planeIndex
+      );
+      const topTwo = sortedUnique.slice(0, 2);
+      for (const m of topTwo) {
+        visibleButtonMap.set(m.planeIndex, m);
       }
     }
 
@@ -307,37 +482,57 @@ export class HudScreens {
       const btn = this.rootEl.querySelector(`[data-testid="${planeTestIds[pIdx]}"]`);
       const tag = this.rootEl.querySelector(`#plane-tag-${pIdx}`);
       if (!btn) continue;
-      const move = legalMap.get(pIdx);
+      const move = visibleButtonMap.get(pIdx);
       if (move) {
         btn.hidden = false;
         btn.style.setProperty('--plane-color', activePlayer.hex);
+        btn.classList.toggle('best-move-hint', Boolean(move.isBestHint));
         if (tag) {
-          if (move.crowned) tag.textContent = '🏆 冲线!';
-          else if (move.allCaptureTargets?.length > 0) tag.textContent = '💥 撞敌机!';
-          else if (move.didFly) tag.textContent = '🚀 飞棋+12';
-          else if (move.didJump) tag.textContent = '⚡ 跳子+4';
-          else if (move.tookOff) tag.textContent = '🛫 起飞';
-          else tag.textContent = `前进+${simSnap.diceValue}`;
+          if (move.tookOff) {
+            tag.textContent = '🛫 起飞';
+          } else if (move.outcomeIcon && move.outcomeLabel) {
+            tag.textContent = `${move.outcomeIcon} ${move.outcomeLabel}`;
+          } else if (move.crowned) {
+            tag.textContent = '⭐ 到家!';
+          } else if (move.allCaptureTargets?.length > 0) {
+            tag.textContent = '💥 击落!';
+          } else if (move.didFly) {
+            tag.textContent = '✈️ 飞棋+12';
+          } else if (move.didJump) {
+            tag.textContent = '🦘 跳子+4';
+          } else {
+            tag.textContent = `前进+${simSnap.diceValue}`;
+          }
         }
       } else {
         btn.hidden = true;
+        btn.classList.remove('best-move-hint');
       }
     }
 
-    // Roll button: hide ONLY when all 4 plane buttons are visible simultaneously
-    // so total visible clickable controls is NEVER > 6 (2 top + 4 plane = 6)!
+    // Roll button: always visible during play (>= 96 px height, pulsing on human turn, 1.6x die face)
     const rollBtn = this.rootEl.querySelector(`[data-testid="${TEST_IDS.HUD_BTN_ROLL}"]`);
     const rollFace = this.rootEl.querySelector('#hud-roll-die-face');
     const rollLabel = this.rootEl.querySelector('#hud-roll-label');
     if (rollBtn) {
-      rollBtn.hidden = legalMap.size >= 4;
+      rollBtn.hidden = false;
       rollBtn.disabled = Boolean(activePlayer?.isAi);
+      rollBtn.classList.toggle('pulsing-roll', isHumanActive);
       if (rollFace) {
-        rollFace.textContent = rolledVal ? `${rolledVal}点` : '🎲';
+        if (isHumanMoveChoice) {
+          rollFace.textContent = '✨';
+        } else {
+          rollFace.textContent = rolledVal ? `${dieFaces[rolledVal] || rolledVal}` : '🎲';
+        }
+        if (isNewRollPop) {
+          rollFace.classList.remove('dice-stamp-pop');
+          void rollFace.offsetWidth;
+          rollFace.classList.add('dice-stamp-pop');
+        }
       }
       if (rollLabel) {
         if (isHumanMoveChoice) {
-          rollLabel.textContent = '智能出发';
+          rollLabel.textContent = '帮我走';
         } else if (activePlayer?.isAi) {
           rollLabel.textContent = '电脑回合';
         } else {
